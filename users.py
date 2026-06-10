@@ -88,7 +88,8 @@ def get_or_create(chat_id, name: str = "", username: str = "") -> dict:
     # eski kayıtlara yeni alanları ekle
     u.setdefault("portfolio", {})
     u.setdefault("settings", copy.deepcopy(config.DEFAULT_SETTINGS))
-    u["settings"].setdefault("signals", False)
+    for k, v in config.DEFAULT_SETTINGS.items():
+        u["settings"].setdefault(k, v)   # eski kayıtlara yeni ayar alanlarını ekle
     u.setdefault("alerts", [])
     u.setdefault("signal_state", {})
     u.setdefault("next_alert_id", 1)

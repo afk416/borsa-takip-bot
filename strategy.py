@@ -107,13 +107,18 @@ def check_signal(chart: dict, st: dict) -> dict:
     lows   = chart["lows"]
     vols   = chart["volumes"]
 
-    period = int(st.get("rsi_period", 14))
+    period = int(st.get("rsi_period", 21))
     smooth = int(st.get("rsi_smooth", 1))
-    low    = float(st.get("rsi_low", 30))
-    high   = float(st.get("rsi_high", 70))
+    low    = float(st.get("rsi_low", 25))
+    high   = float(st.get("rsi_high", 78))
     mode   = st.get("signal_mode", "Crossover")
 
-    need = max(period, config.VOLUME_MA_LEN, config.RANGE_FILTER_LEN) + 5
+    vol_ma_len = int(st.get("vol_ma_len", config.VOLUME_MA_LEN))
+    vol_mult   = float(st.get("vol_mult", config.VOLUME_MULTIPLIER))
+    range_len  = int(st.get("range_len", config.RANGE_FILTER_LEN))
+    min_range  = float(st.get("min_range", config.MIN_RANGE_PCT))
+
+    need = max(period, vol_ma_len, range_len) + 5
     if len(closes) < need:
         return None
 
@@ -143,22 +148,22 @@ def check_signal(chart: dict, st: dict) -> dict:
     # ---- Hacim filtresi ----
     volume_ok, vol_ratio = True, 0.0
     if st.get("vol_filter", True):
-        vma = _sma_last(vols[:-1], config.VOLUME_MA_LEN)   # açık mum hariç
+        vma = _sma_last(vols[:-1], vol_ma_len)   # açık mum hariç
         if vma and vma > 0:
             vol_ratio = vols[-1] / vma
-            volume_ok = vols[-1] > vma * config.VOLUME_MULTIPLIER
+            volume_ok = vols[-1] > vma * vol_mult
 
     # ---- Volatilite (range) filtresi ----
     range_ok, range_pct = True, 0.0
     if st.get("range_filter", True):
-        n = config.RANGE_FILTER_LEN
+        n = range_len
         rh = highs[-(n + 1):-1]      # son N kapanmış mum
         rl = lows[-(n + 1):-1]
         rc = closes[-(n + 1):-1]
         rngs = [(h - l) / c * 100 for h, l, c in zip(rh, rl, rc) if c]
         if rngs:
             range_pct = sum(rngs) / len(rngs)
-            range_ok = range_pct >= config.MIN_RANGE_PCT
+            range_ok = range_pct >= min_range
 
     if not (volume_ok and range_ok):
         return None

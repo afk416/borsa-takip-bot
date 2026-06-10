@@ -679,21 +679,27 @@ async def handle_portfolio_input(update: Update, user, text: str):
 def settings_text(user) -> str:
     st = user["settings"]
     return (
-        "⚙️ *Ayarların*\n\n"
+        "⚙️ *İndikatör Ayarların*\n\n"
+        "📐 *İndikatör*\n"
         f"RSI Periyot: *{st['rsi_period']}*\n"
         f"RSI Smooth (EMA): *{st.get('rsi_smooth', 1)}*\n"
-        f"Aşırı Satım eşiği: *{st['rsi_low']}*\n"
-        f"Aşırı Alım eşiği: *{st['rsi_high']}*\n"
+        f"Aşırı Satım (LOW): *{st['rsi_low']}*\n"
+        f"Aşırı Alım (HIGH): *{st['rsi_high']}*\n"
         f"Zaman Dilimi: *{interval_label(st['interval'])}*\n"
-        f"Sinyal Modu: *{st.get('signal_mode', 'Crossover')}*\n"
-        f"Hacim Filtresi: *{'Açık ✅' if st.get('vol_filter') else 'Kapalı'}*\n"
-        f"Volatilite Filtresi: *{'Açık ✅' if st.get('range_filter') else 'Kapalı'}*\n"
+        f"Sinyal Modu: *{st.get('signal_mode', 'Crossover')}*\n\n"
+        "📊 *Hacim Filtresi*\n"
+        f"Aktif: *{'✅' if st.get('vol_filter') else '❌'}* · "
+        f"MA Pencere: *{st.get('vol_ma_len', 20)}* · "
+        f"Çarpan: *{st.get('vol_mult', 1.0)}x*\n\n"
+        "📈 *Volatilite Filtresi*\n"
+        f"Aktif: *{'✅' if st.get('range_filter') else '❌'}* · "
+        f"Pencere: *{st.get('range_len', 20)}* mum · "
+        f"Min Range: *%{st.get('min_range', 0.1)}*\n\n"
+        "🔔 *Genel*\n"
         f"Bildirimler: *{'Açık 🔔' if st['notif'] else 'Kapalı 🔕'}*\n"
         f"Otomatik AL/SAT Sinyali: *{'Açık 📡' if st.get('signals') else 'Kapalı'}*\n\n"
-        "_RSI eşikleri hem taramada hem alarmlarda hem de AL/SAT sinyalinde kullanılır._\n"
-        "_AL/SAT sinyali açıkken listendeki hisseler otomatik taranır; seçtiğin moda "
-        "göre crossover olunca, hacim ve volatilite filtrelerinden geçen sinyaller "
-        "(ATR'a göre Stop/Hedef'le birlikte) bildirilir._"
+        "_Crossover olunca, hacim ve volatilite filtrelerinden geçen sinyaller "
+        "ATR'a göre Stop/Hedef'le birlikte bildirilir._"
     )
 
 
@@ -706,21 +712,29 @@ def settings_keyboard(user) -> InlineKeyboardMarkup:
                 for o in options]
 
     rows = [
-        opt_row("rp", [7, 14, 21], st["rsi_period"]),
+        # — İNDİKATÖR —
+        opt_row("rp", [7, 14, 21, 28], st["rsi_period"]),
         opt_row("rs", [1, 3, 5], st.get("rsi_smooth", 1)),
         opt_row("rl", [20, 25, 30, 35], st["rsi_low"]),
-        opt_row("rh", [65, 70, 75, 80], st["rsi_high"]),
+        opt_row("rh", [70, 75, 78, 80], st["rsi_high"]),
         opt_row("int", list(yahoo_client.INTERVALS.keys()), st["interval"],
                 fmt=interval_label),
         [InlineKeyboardButton(("✅ " if m == st.get("signal_mode", "Crossover") else "") + m,
                               callback_data=f"c:mode:{i}")
          for i, m in enumerate(config.SIGNAL_MODES)],
+        # — HACİM FİLTRESİ —
         [InlineKeyboardButton(
-            "📊 Hacim Filtresi: " + ("Açık ✅" if st.get("vol_filter") else "Kapalı"),
+            "📊 Hacim Filtresi: " + ("Açık ✅" if st.get("vol_filter") else "Kapalı ❌"),
             callback_data="c:volf:x")],
+        opt_row("vml", [10, 20, 30, 50], st.get("vol_ma_len", 20)),
+        opt_row("vmu", [1.0, 1.2, 1.5, 2.0], st.get("vol_mult", 1.0), fmt=lambda x: f"{x}x"),
+        # — VOLATİLİTE FİLTRESİ —
         [InlineKeyboardButton(
-            "📈 Volatilite Filtresi: " + ("Açık ✅" if st.get("range_filter") else "Kapalı"),
+            "📈 Volatilite Filtresi: " + ("Açık ✅" if st.get("range_filter") else "Kapalı ❌"),
             callback_data="c:rangef:x")],
+        opt_row("rfl", [10, 20, 30, 50], st.get("range_len", 20)),
+        opt_row("mrp", [0.1, 0.3, 0.5, 1.0], st.get("min_range", 0.1), fmt=lambda x: f"%{x}"),
+        # — GENEL —
         [InlineKeyboardButton(
             "🔕 Bildirimleri Kapat" if st["notif"] else "🔔 Bildirimleri Aç",
             callback_data="c:notif:x")],
@@ -728,11 +742,11 @@ def settings_keyboard(user) -> InlineKeyboardMarkup:
             "📡 AL/SAT Sinyalini Kapat" if st.get("signals") else "📡 AL/SAT Sinyalini Aç",
             callback_data="c:signals:x")],
     ]
-    # satır başlıkları
-    rows[0].insert(0, InlineKeyboardButton("RSI:",    callback_data="c:noop:x"))
-    rows[1].insert(0, InlineKeyboardButton("Smooth:", callback_data="c:noop:x"))
-    rows[2].insert(0, InlineKeyboardButton("Alt:",    callback_data="c:noop:x"))
-    rows[3].insert(0, InlineKeyboardButton("Üst:",    callback_data="c:noop:x"))
+    # satır başlıkları (ilk butona etiket ekle)
+    labels = {0: "RSI:", 1: "Smooth:", 2: "Alt:", 3: "Üst:",
+              7: "MA:", 8: "Çarpan:", 10: "Pencere:", 11: "MinR:"}
+    for idx, lbl in labels.items():
+        rows[idx].insert(0, InlineKeyboardButton(lbl, callback_data="c:noop:x"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -983,8 +997,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 st["signal_mode"] = config.SIGNAL_MODES[int(parts[2])]
             elif key == "volf":
                 st["vol_filter"] = not st.get("vol_filter", True)
+            elif key == "vml":
+                st["vol_ma_len"] = int(parts[2])
+            elif key == "vmu":
+                st["vol_mult"] = float(parts[2])
             elif key == "rangef":
                 st["range_filter"] = not st.get("range_filter", True)
+            elif key == "rfl":
+                st["range_len"] = int(parts[2])
+            elif key == "mrp":
+                st["min_range"] = float(parts[2])
             elif key == "notif":
                 st["notif"] = not st["notif"]
             elif key == "signals":

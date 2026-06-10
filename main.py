@@ -136,6 +136,7 @@ async def async_main():
 
     public_url = os.environ.get("RENDER_EXTERNAL_URL") or os.environ.get("PUBLIC_URL")
     if public_url:
+        # Canlı (Render): webhook modu
         webhook_url = f"{public_url.rstrip('/')}/webhook"
         try:
             await _telegram_app.bot.delete_webhook(drop_pending_updates=True)
@@ -148,7 +149,15 @@ async def async_main():
         except Exception as e:
             log.error(f"Webhook kurulamadı: {e}")
     else:
-        log.warning("⚠️ RENDER_EXTERNAL_URL yok, webhook kurulamaz (lokal test modu)")
+        # Lokal test: polling modu (public URL yok)
+        log.info("🔄 Public URL yok — POLLING modu (lokal test)")
+        try:
+            await _telegram_app.bot.delete_webhook(drop_pending_updates=True)
+            await _telegram_app.updater.start_polling(
+                allowed_updates=["message", "callback_query"])
+            log.info("✅ Polling başladı — bot mesajlara cevap veriyor")
+        except Exception as e:
+            log.error(f"Polling başlatılamadı: {e}", exc_info=True)
 
     asyncio.create_task(alert_loop())
     asyncio.create_task(keep_alive_loop())
