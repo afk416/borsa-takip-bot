@@ -6,6 +6,7 @@ TradingView (tvdatafeed) veri istemcisi — SADECE analiz/backtest için.
 - ~15 dk gecikmeli (backtest için önemsiz). Canlı sinyaller yine Yahoo'dan gelir.
 - Başarısız olursa None döner; çağıran taraf Yahoo'ya fallback yapar.
 """
+import time
 import logging
 import threading
 
@@ -14,9 +15,11 @@ log = logging.getLogger(__name__)
 logging.getLogger("tvDatafeed").setLevel(logging.CRITICAL)
 
 HISTORY_BARS = 5000   # login'siz üst sınır
+CACHE_TTL = 600       # çekilen veri 10 dk cache'lenir (tekrar çekmeyi önler)
 
 _tv = None
 _lock = threading.Lock()
+_cache = {}           # (symbol, interval_key) -> (zaman, data)
 
 
 def is_enabled() -> bool:
@@ -85,15 +88,16 @@ def _fetch_once(symbol: str, interval_key: str):
         return None
 
 
-def fetch_history(symbol: str, interval_key: str = "gunluk", retries: int = 2):
-    """OHLCV dict döner. tvdatafeed ara sıra ilk denemede boş döndüğü için
-    retry yapar (bağlantıyı yenileyerek) → tutarlı sonuç. Hepsi boşsa None."""
-    global _tv
-    for attempt in range(retries + 1):
+def fetch_history(symbol: str, interval_key: str = "gunluk", retries: int = 1):
+    """OHLCV dict döner. 10 dk cache + aynı bağlantıda retry (boş dönerse tekrar).
+    Hepsi boşsa None. Cache sayesinde liste analizi/açık lot tekrar tekrar çekmez."""
+    key = (symbol, interval_key)
+    cached = _cache.get(key)
+    if cached and (time.time() - cached[0]) < CACHE_TTL:
+        return cached[1]
+    for _ in range(retries + 1):
         out = _fetch_once(symbol, interval_key)
         if out:
+            _cache[key] = (time.time(), out)
             return out
-        if attempt < retries:        # bağlantıyı sıfırla, tekrar dene
-            with _lock:
-                _tv = None
     return None

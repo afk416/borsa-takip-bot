@@ -1314,9 +1314,14 @@ def analyze_period_buttons(sym, current_key) -> InlineKeyboardMarkup:
 
 async def _fetch_backtest_chart(sym, ikey):
     """Analiz için OHLCV çeker: önce TradingView (uzun geçmiş), olmazsa Yahoo.
+    tvdatafeed takılırsa 25 sn sonra Yahoo'ya düşer (liste analizi donmasın).
     Döner (chart, kaynak_adı) — chart None ise veri yok."""
     if tv_client.is_enabled():
-        chart = await asyncio.to_thread(tv_client.fetch_history, sym, ikey)
+        try:
+            chart = await asyncio.wait_for(
+                asyncio.to_thread(tv_client.fetch_history, sym, ikey), timeout=25)
+        except (asyncio.TimeoutError, Exception):
+            chart = None
         if chart and len(chart["closes"]) >= 40:
             return chart, "TradingView"
     yh_iv, yh_rng, _ = yahoo_client.BACKTEST_RANGE.get(
