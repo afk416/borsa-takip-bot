@@ -989,6 +989,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.answer("📊 Analiz başlıyor...")
             await analyze_symbol(chat_id, user, sym)
 
+        elif ns == "an2":      # zaman dilimi değiştir (mesajı yerinde günceller)
+            sym, ikey = parts[1], parts[2]
+            await q.answer("📊 Yeniden hesaplanıyor...")
+            await analyze_symbol(chat_id, user, sym, interval_key=ikey,
+                                 edit_message=q.message)
+
         # ---- Liste (grid) düzenleme ----
         elif ns == "wl":
             action = parts[1]
@@ -1212,17 +1218,32 @@ async def send_to(chat_id, text: str):
 # ============================================================
 # ANALİZ (backtest)
 # ============================================================
-async def analyze_symbol(chat_id, user, sym):
-    """Son 1 yıl backtest: AL→SAT işlemleri, 1 lot için kar/zarar özeti."""
+def analyze_period_buttons(sym, current_key) -> InlineKeyboardMarkup:
+    opts = [("15dk", "15dk·60g"), ("1saat", "1saat·2y"),
+            ("gunluk", "Günlük·2y"), ("haftalik", "Haftalık·5y")]
+    row = [InlineKeyboardButton(("✅ " if k == current_key else "") + lbl,
+                                callback_data=f"an2:{sym}:{k}")
+           for k, lbl in opts]
+    return InlineKeyboardMarkup([row])
+
+
+async def analyze_symbol(chat_id, user, sym, interval_key=None, edit_message=None):
+    """Backtest: lot biriktirmeli AL→SAT, seçilen zaman diliminde."""
+    st = user["settings"]
+    ikey = interval_key or st.get("interval", "gunluk")
+    yh_iv, yh_rng, period_label = yahoo_client.BACKTEST_RANGE.get(
+        ikey, yahoo_client.BACKTEST_RANGE["gunluk"])
+
     try:
-        msg = await _app.bot.send_message(
-            chat_id=chat_id, text="📊 Son 1 yıl analiz ediliyor, bekle...")
+        if edit_message is not None:
+            msg = edit_message
+            await msg.edit_text(f"📊 {period_label} analiz ediliyor...")
+        else:
+            msg = await _app.bot.send_message(
+                chat_id=chat_id, text=f"📊 {period_label} analiz ediliyor, bekle...")
     except Exception:
         return
 
-    st = user["settings"]
-    yh_iv, yh_rng, period_label = yahoo_client.BACKTEST_RANGE.get(
-        st.get("interval", "gunluk"), yahoo_client.BACKTEST_RANGE["gunluk"])
     chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, yh_iv, yh_rng)
     if not chart or len(chart["closes"]) < 40:
         await msg.edit_text(f"❌ {base_sym(sym)} için yeterli geçmiş veri yok.")
@@ -1235,8 +1256,8 @@ async def analyze_symbol(chat_id, user, sym):
               f"{period_label} ({res['bars']} mum)_\n\n")
 
     if res["trades"] == 0:
-        body = ("Bu ayarlarla son 1 yılda tamamlanmış (AL→SAT) işlem oluşmadı."
-                "\n_Eşikleri veya modu değiştirip tekrar deneyebilirsin._")
+        body = ("Bu ayarlarla bu dönemde tamamlanmış (AL→SAT) işlem oluşmadı."
+                "\n_Daha uzun bir zaman dilimi (👇) ya da farklı mod/eşik deneyebilirsin._")
         if res["open_lots"]:
             body += (f"\n_(Şu an {res['open_lots']} AL sinyali birikmiş ama "
                      "henüz SAT gelmemiş.)_")
@@ -1262,10 +1283,11 @@ async def analyze_symbol(chat_id, user, sym):
                      "satılmadı, dahil değil.)_")
 
     note = ("\n\n_⚠️ Geçmiş performans geleceği garanti etmez. Komisyon/vergi hariç. "
-            "Her lot kendi alış fiyatına göre değerlendirilir. Analiz, sinyal aldığın "
-            "zaman dilimiyle aynı periyotta yapılır._")
+            "Farklı zaman dilimi için aşağıdaki butonları kullan (15dk Yahoo'da en fazla "
+            "60 gün; daha uzun geçmiş için 1 saat/günlük)._")
     try:
-        await msg.edit_text(header + body + note, parse_mode="Markdown")
+        await msg.edit_text(header + body + note, parse_mode="Markdown",
+                            reply_markup=analyze_period_buttons(sym, ikey))
     except Exception as e:
         log.error(f"Analiz mesajı düzenlenemedi: {e}")
 
