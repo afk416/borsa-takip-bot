@@ -1344,8 +1344,8 @@ async def analyze_watchlist(chat_id, user):
             w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
         else:
             w, l, p = res["wins"], res["losses"], res["total_pct"]
-        lots = res["total_lots"]
-        spent = res["total_spent"]
+        lots = res["trades"]          # KAPATILAN lot sayısı (açık olanlar hariç)
+        spent = res["total_spent"]    # kapatılan lotların alış fiyatları toplamı
         tot_w += w
         tot_l += l
         tot_lots += lots
@@ -1368,7 +1368,7 @@ async def analyze_watchlist(chat_id, user):
     ay = max_span / 30.0
     donem = (f"~{max_span} gün (~{ay:.0f} ay)" if max_span else "")
     inner = (f"{mod_adi} · {interval_label(ikey)} mum · {donem}\n"
-             f"K/Z% ortalama · HARCANAN = lot fiyatları toplamı\n\n"
+             f"LOT/HARCANAN = kapatılan lotlar (açıklar hariç)\n\n"
              + "\n".join(tbl))
     try:
         await msg.edit_text("```\n" + inner + "\n```", parse_mode="Markdown")

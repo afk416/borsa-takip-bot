@@ -237,7 +237,7 @@ def backtest(chart: dict, st: dict) -> dict:
     trades = []        # LOT bazlı: kapanan her lotun kar/zarar yüzdesi
     cycle_trades = []  # İŞLEM bazlı: her AL→SAT döngüsünün NET kar/zarar yüzdesi
     total_lots = 0     # toplam alınan lot (AL sinyali) sayısı
-    total_spent = 0.0  # toplam harcanan = her lotun alış fiyatları toplamı
+    total_spent = 0.0  # harcanan = SADECE KAPATILAN lotların alış fiyatları toplamı
 
     for i in range(need, n):
         rn, rp = rsis[i], rsis[i - 1]
@@ -275,13 +275,13 @@ def backtest(chart: dict, st: dict) -> dict:
         if long_sig:
             open_lots.append(closes[i])    # her AL'da +1 lot biriktir
             total_lots += 1
-            total_spent += closes[i]       # o lotun alış fiyatı
         elif short_sig and open_lots:
             sat = closes[i]
             valid = [al for al in open_lots if al > 0]
-            # LOT bazlı: her lot ayrı işlem
+            # LOT bazlı: her lot ayrı işlem; harcanan = kapatılan lotun alışı
             for al in valid:
                 trades.append((sat - al) / al * 100.0)
+                total_spent += al          # SADECE kapatılan lot sayılır
             # İŞLEM bazlı: bu döngünün net sonucu (sermaye ağırlıklı)
             if valid:
                 cost = sum(valid)
