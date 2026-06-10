@@ -207,6 +207,13 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📈/📉 Fiyat alarmı: hedef fiyata gelince 1 kez bildirir, kapanır\n"
         "🟢/🔴 RSI alarmı: aşırı satım/alım bölgesine girince bildirir "
         "(aynı hisse için en erken 4 saatte bir)\n\n"
+        "*📡 Otomatik AL/SAT Sinyali:*\n"
+        f"{BTN_SETTINGS} → *AL/SAT Sinyalini Aç* dersen, listendeki TÜM hisseler "
+        "otomatik taranır (alarm kurmana gerek yok):\n"
+        "🟢 *AL* — RSI aşırı satımdan yukarı dönünce\n"
+        "🔴 *SAT* — RSI aşırı alımdan aşağı dönünce\n"
+        "Sinyal sadece dönüş anında bir kez gelir. İşlemi Midas'tan elle yaparsın "
+        "(bot otomatik alım-satım YAPMAZ).\n\n"
         "_Bu bot herkese açık — arkadaşların da kendi Telegram'ından "
         "/start diyerek kendi listesini kurabilir._",
         parse_mode="Markdown", reply_markup=main_menu_keyboard(),
@@ -612,8 +619,11 @@ def settings_text(user) -> str:
         f"Aşırı Satım eşiği: *{st['rsi_low']}*\n"
         f"Aşırı Alım eşiği: *{st['rsi_high']}*\n"
         f"Zaman Dilimi: *{interval_label(st['interval'])}*\n"
-        f"Bildirimler: *{'Açık 🔔' if st['notif'] else 'Kapalı 🔕'}*\n\n"
-        "_Bu ayarlar RSI taraması ve RSI alarmlarında kullanılır._"
+        f"Bildirimler: *{'Açık 🔔' if st['notif'] else 'Kapalı 🔕'}*\n"
+        f"Otomatik AL/SAT Sinyali: *{'Açık 📡' if st.get('signals') else 'Kapalı'}*\n\n"
+        "_RSI eşikleri hem taramada hem alarmlarda hem de AL/SAT sinyalinde kullanılır._\n"
+        "_AL/SAT sinyali açıkken listendeki hisseler otomatik taranır; RSI aşırı "
+        "satımdan dönünce AL, aşırı alımdan dönünce SAT bildirimi gelir._"
     )
 
 
@@ -634,6 +644,9 @@ def settings_keyboard(user) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(
             "🔕 Bildirimleri Kapat" if st["notif"] else "🔔 Bildirimleri Aç",
             callback_data="c:notif:x")],
+        [InlineKeyboardButton(
+            "📡 AL/SAT Sinyalini Kapat" if st.get("signals") else "📡 AL/SAT Sinyalini Aç",
+            callback_data="c:signals:x")],
     ]
     # satır başlıkları
     rows[0].insert(0, InlineKeyboardButton("RSI:", callback_data="c:noop:x"))
@@ -862,6 +875,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 st["interval"] = parts[2]
             elif key == "notif":
                 st["notif"] = not st["notif"]
+            elif key == "signals":
+                st["signals"] = not st.get("signals", False)
+                if not st["signals"]:
+                    user["signal_state"] = {}   # kapatınca baseline sıfırlansın
             users.save_async()
             await q.answer("✅ Kaydedildi")
             try:

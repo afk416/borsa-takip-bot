@@ -14,6 +14,7 @@ from telegram import Update
 import config
 import users
 import alerts
+import signals
 import telegram_handler
 
 # ============================================================
@@ -89,6 +90,16 @@ async def alert_loop():
                 log.info(f"🔔 {len(triggered)} alarm tetiklendi")
         except Exception as e:
             log.error(f"Alarm döngüsü hatası: {e}", exc_info=True)
+
+        try:
+            sigs = await asyncio.to_thread(signals.scan)
+            for chat_id, text in sigs:
+                await telegram_handler.send_to(chat_id, text)
+            if sigs:
+                log.info(f"📡 {len(sigs)} AL/SAT sinyali gönderildi")
+        except Exception as e:
+            log.error(f"Sinyal döngüsü hatası: {e}", exc_info=True)
+
         await asyncio.sleep(config.CHECK_INTERVAL)
 
 

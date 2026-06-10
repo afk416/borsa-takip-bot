@@ -9,8 +9,9 @@ Yapı:
       "name", "username", "created", "authorized",
       "watchlist": ["THYAO.IS", ...],
       "portfolio": {"THYAO.IS": {"qty": 10, "cost": 230.0}},
-      "settings":  {"rsi_period", "rsi_low", "rsi_high", "interval", "notif"},
+      "settings":  {"rsi_period", "rsi_low", "rsi_high", "interval", "notif", "signals"},
       "alerts":    [{"id", "symbol", "type", "value", "active", "last_fired"}],
+      "signal_state": {"THYAO.IS": "low"},   # sinyal modu için son RSI bölgesi
       "next_alert_id": 1,
       "pending": None | {...}   # çok adımlı akışlar için bekleyen girdi
     }
@@ -71,6 +72,7 @@ def get_or_create(chat_id, name: str = "", username: str = "") -> dict:
             "portfolio":  {},
             "settings":   copy.deepcopy(config.DEFAULT_SETTINGS),
             "alerts":     [],
+            "signal_state": {},
             "next_alert_id": 1,
             "pending":    None,
         }
@@ -86,7 +88,9 @@ def get_or_create(chat_id, name: str = "", username: str = "") -> dict:
     # eski kayıtlara yeni alanları ekle
     u.setdefault("portfolio", {})
     u.setdefault("settings", copy.deepcopy(config.DEFAULT_SETTINGS))
+    u["settings"].setdefault("signals", False)
     u.setdefault("alerts", [])
+    u.setdefault("signal_state", {})
     u.setdefault("next_alert_id", 1)
     return u
 

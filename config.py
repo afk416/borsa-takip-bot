@@ -36,6 +36,7 @@ DEFAULT_SETTINGS = {
     "rsi_high":   70,
     "interval":   "gunluk",   # yahoo_client.INTERVALS anahtarı
     "notif":      True,
+    "signals":    False,      # otomatik AL/SAT sinyal modu (watchlist taraması)
 }
 
 # ============================================================
