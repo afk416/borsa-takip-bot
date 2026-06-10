@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: borsa-takip-bot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: ADMIN_CHAT_ID
+        sync: false
+      - key: ACCESS_CODE
+        sync: false
