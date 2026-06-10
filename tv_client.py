@@ -65,9 +65,12 @@ def _fetch_once(symbol: str, interval_key: str):
         tvsym, exchanges = _resolve(symbol)
         df = None
         for exch in exchanges:
+            # ABD: extended hours (pre/post market) — TradingView ile aynı veri.
+            # BIST: tek seans, extended yok.
+            ext = (exch != "BIST")
             try:
-                df = tv.get_hist(symbol=tvsym, exchange=exch,
-                                 interval=iv, n_bars=HISTORY_BARS)
+                df = tv.get_hist(symbol=tvsym, exchange=exch, interval=iv,
+                                 n_bars=HISTORY_BARS, extended_session=ext)
             except Exception:
                 df = None
             if df is not None and len(df) > 0:
@@ -88,16 +91,20 @@ def _fetch_once(symbol: str, interval_key: str):
         return None
 
 
-def fetch_history(symbol: str, interval_key: str = "gunluk", retries: int = 1):
-    """OHLCV dict döner. 10 dk cache + aynı bağlantıda retry (boş dönerse tekrar).
+def fetch_history(symbol: str, interval_key: str = "gunluk", retries: int = 3):
+    """OHLCV dict döner. 1 saat cache + retry (tvdatafeed ara sıra boş döner).
     Hepsi boşsa None. Cache sayesinde liste analizi/açık lot tekrar tekrar çekmez."""
     key = (symbol, interval_key)
     cached = _cache.get(key)
     if cached and (time.time() - cached[0]) < CACHE_TTL:
         return cached[1]
-    for _ in range(retries + 1):
+    global _tv
+    for attempt in range(retries + 1):
         out = _fetch_once(symbol, interval_key)
         if out:
             _cache[key] = (time.time(), out)
             return out
+        if attempt == 1:        # 2. denemede de boşsa bağlantıyı tazele
+            with _lock:
+                _tv = None
     return None
