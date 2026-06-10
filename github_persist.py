@@ -38,6 +38,7 @@ def find_or_create_gist() -> str:
     if not GITHUB_TOKEN:
         return None
 
+    listing_ok = False
     try:
         page = 1
         while True:
@@ -47,6 +48,7 @@ def find_or_create_gist() -> str:
             )
             r.raise_for_status()
             gists = r.json()
+            listing_ok = True   # en az bir sayfa başarıyla okundu
             if not gists:
                 break
             for g in gists:
@@ -61,6 +63,13 @@ def find_or_create_gist() -> str:
     except Exception as e:
         log.error(f"Gist listeleme hatası: {e}")
 
+    # KRİTİK: listeleme başarısız olduysa (network/DNS) YENİ gist OLUŞTURMA —
+    # gist gerçekte var olabilir, yeni oluşturmak duplicate + veri kopması yaratır.
+    if not listing_ok:
+        log.warning("⚠️ Gist listelenemedi (geçici hata); yeni gist oluşturulmuyor.")
+        return None
+
+    # Liste başarılı ama filename bulunamadı → gist gerçekten yok, yenisini oluştur
     try:
         payload = {
             "description": GIST_DESCRIPTION,
