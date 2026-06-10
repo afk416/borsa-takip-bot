@@ -229,10 +229,9 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*📡 Otomatik AL/SAT Sinyali:*\n"
         f"{BTN_SETTINGS} → *AL/SAT Sinyalini Aç* dersen, listendeki TÜM hisseler "
         "otomatik taranır (alarm kurmana gerek yok):\n"
-        "🟢 *AL* — pozisyon yokken RSI yukarı kesişince → girmeyi düşün\n"
-        "🔴 *SAT* — AL'dan sonra RSI aşağı kesişince → *tüm alımları kapat*\n"
-        "_Pozisyon yokken SAT sinyali gelirse bot bir şey yapmaz — asla açığa "
-        "satış (short) önermez. Önce AL, sonra SAT sırası izlenir._\n"
+        "🟢 *AL* — her sinyalde *+1 lot* topla (üst üste AL gelirse lot birikir)\n"
+        "🔴 *SAT* — ilk SAT'ta biriken *tüm lotları* sat, pozisyonu kapat\n"
+        "_Pozisyon yokken SAT gelirse bot tepkisiz kalır — asla açığa satış yapmaz._\n"
         "AL sinyalinde RSI + ATR'a göre önerilen 🛑 Stop / 🎯 Hedef gelir.\n\n"
         "*Sinyal modları (Ayarlar'dan seç):*\n"
         "• *Crossover* — RSI, aşırı satım/alım eşiğini keser\n"
@@ -1236,27 +1235,32 @@ async def analyze_symbol(chat_id, user, sym):
     if res["trades"] == 0:
         body = ("Bu ayarlarla son 1 yılda tamamlanmış (AL→SAT) işlem oluşmadı."
                 "\n_Eşikleri veya modu değiştirip tekrar deneyebilirsin._")
-        if res["open_pos"]:
-            body += "\n_(Açık bir AL sinyali var ama henüz SAT gelmemiş.)_"
+        if res["open_lots"]:
+            body += (f"\n_(Şu an {res['open_lots']} AL sinyali birikmiş ama "
+                     "henüz SAT gelmemiş.)_")
     else:
         win_rate = res["wins"] / res["trades"] * 100
         tsign = "+" if res["total_pct"] >= 0 else ""
         asign = "+" if res["avg_pct"] >= 0 else ""
         emoji = "🟢" if res["total_pct"] >= 0 else "🔴"
         body = (
-            "*1 ADET LOT İÇİN*\n"
-            f"🔄 Toplam Al-Sat: *{res['trades']}*\n"
+            "🛒 *LOT BİRİKTİRME MANTIĞI*\n"
+            "_Her AL'da +1 lot; ilk SAT'ta biriken tüm lotlar satılır._\n\n"
+            f"🛒 Toplam alınan lot: *{res['total_lots']}*\n"
+            f"🔄 Toplam Al-Sat (kapanan lot): *{res['trades']}*\n"
             f"🟢 Karlı işlem: *{res['wins']}*\n"
             f"🔴 Zararlı işlem: *{res['losses']}*\n"
             f"{emoji} Kar/Zarar: *{tsign}{fmt_num(res['total_pct'], 1)}%*\n\n"
-            f"_Başarı oranı: %{fmt_num(win_rate, 0)} · işlem başına ort. "
-            f"{asign}{fmt_num(res['avg_pct'], 1)}%_\n"
-            f"_En iyi: +{fmt_num(res['best'], 1)}% · en kötü: {fmt_num(res['worst'], 1)}%_"
+            f"_Döngü (al-sat turu): {res['cycles']} · başarı %{fmt_num(win_rate, 0)} · "
+            f"lot başına ort. {asign}{fmt_num(res['avg_pct'], 1)}%_\n"
+            f"_En iyi lot: +{fmt_num(res['best'], 1)}% · en kötü: {fmt_num(res['worst'], 1)}%_"
         )
-        if res["open_pos"]:
-            body += "\n_(Şu an açık bir pozisyon var — son AL henüz kapanmadı, dahil değil.)_"
+        if res["open_lots"]:
+            body += (f"\n_(Şu an {res['open_lots']} lot açık — son AL'lar henüz "
+                     "satılmadı, dahil değil.)_")
 
     note = ("\n\n_⚠️ Geçmiş performans geleceği garanti etmez. Komisyon/vergi hariç. "
+            "Her lot kendi alış fiyatına göre değerlendirilir. "
             "1 yıllık 15dk verisi olmadığından analiz günlük mumla yapılır._")
     try:
         await msg.edit_text(header + body + note, parse_mode="Markdown")

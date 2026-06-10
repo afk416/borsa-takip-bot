@@ -1,14 +1,16 @@
 """
-Otomatik AL/SAT sinyal motoru — LONG-ONLY mantık.
+Otomatik AL/SAT sinyal motoru — LOT BİRİKTİRME mantığı.
 - Sinyal modu açık kullanıcıların TÜM watchlist'i taranır
 - strategy.check_signal eski OKX botunun crossover + filtre mantığını uygular
 - POZİSYON MANTIĞI (kullanıcının isteği):
-    • AL sinyali + pozisyon YOK  → 🟢 AL bildir, pozisyona "girildi" say
-    • AL sinyali + zaten pozisyonda → sessiz (tekrar AL deme)
-    • SAT sinyali + pozisyonda    → 🔴 SAT bildir (TÜM alımları kapat), pozisyon kapandı
-    • SAT sinyali + pozisyon YOK  → HİÇBİR ŞEY (asla short açmaz)
-- Durum kullanıcı kaydında: signal_state[sym] = {"in_pos": bool}
+    • Her AL sinyali     → +1 lot topla (🟢 bildir, toplam lot artar)
+    • İlk SAT sinyali     → biriken TÜM lotları sat (🔴 bildir, lot=0)
+    • SAT + lot yok       → tepkisiz (asla short açmaz)
+- Aynı mum için sinyal bir kez işlenir (last_ts ile spam önleme)
+- Durum: signal_state[sym] = {"lots": int, "last_ts": <bar timestamp>}
 - Senkron çalışır; main.py asyncio.to_thread ile çağırır
+
+Not: BIST'te açığa satış bireysel olarak yoktur; SAT = elindeki lotları kapatmak.
 """
 import logging
 
@@ -22,13 +24,13 @@ from telegram_handler import (
 log = logging.getLogger(__name__)
 
 
-def _format_signal(sym, sig, quote, interval, is_buy: bool) -> str:
+def _format_signal(sym, sig, quote, interval, is_buy: bool, lots: int) -> str:
     if is_buy:
         title = "🟢 *AL Sinyali*"
-        action = "_Pozisyona girmeyi değerlendirebilirsin._"
+        action = f"_+1 lot topla → toplam *{lots} lot*. Midas'tan 1 lot al._"
     else:
-        title = "🔴 *SAT Sinyali — Tüm Alımları Kapat*"
-        action = "_AL sinyaliyle girdiğin pozisyondan çıkış. Elindekini sat._"
+        title = "🔴 *SAT Sinyali — Tüm Lotları Kapat*"
+        action = f"_Biriken *{lots} lotun tamamını* sat. Pozisyonu kapat._"
 
     price_line = ""
     if quote:
@@ -60,7 +62,7 @@ def _format_signal(sym, sig, quote, interval, is_buy: bool) -> str:
 
 
 def scan():
-    """Döner: [(chat_id, mesaj), ...]. signal_state'i günceller."""
+    """Döner: [(chat_id, mesaj), ...]. signal_state'i (lots/last_ts) günceller."""
     results = []
     chart_cache = {}    # (sym, interval) -> chart
     quote_cache = {}    # sym -> quote
@@ -90,25 +92,38 @@ def scan():
                 continue
 
             state = sig_state.get(sym)
-            in_pos = bool(state.get("in_pos")) if isinstance(state, dict) else False
+            if not isinstance(state, dict):
+                state = {}
+            lots = state.get("lots", 0)
+            bar_ts = sig["bar_ts"]
+
+            # Bu mum daha önce değerlendirildiyse atla (spam önleme)
+            if state.get("last_ts") == bar_ts:
+                continue
 
             is_buy = None
             if sig["side"] == "long":
-                if in_pos:
-                    continue            # zaten pozisyonda → tekrar AL gönderme
+                lots += 1
+                sig_state[sym] = {"lots": lots, "last_ts": bar_ts}
+                dirty = True
                 is_buy = True
-                sig_state[sym] = {"in_pos": True}
             else:  # short sinyali
-                if not in_pos:
-                    continue            # pozisyon yok → short AÇMA, sessiz geç
-                is_buy = False
-                sig_state[sym] = {"in_pos": False}
+                if lots > 0:
+                    sig_state[sym] = {"lots": 0, "last_ts": bar_ts}
+                    dirty = True
+                    is_buy = False
+                else:
+                    # Pozisyon yok → short açma; ama mumu işlenmiş say
+                    sig_state[sym] = {"lots": 0, "last_ts": bar_ts}
+                    dirty = True
+                    continue
 
-            dirty = True
             if sym not in quote_cache:
                 quote_cache[sym] = yahoo_client.get_quote(sym)
+            shown_lots = lots if is_buy else state.get("lots", 0)
             results.append((cid,
-                            _format_signal(sym, sig, quote_cache[sym], interval, is_buy)))
+                            _format_signal(sym, sig, quote_cache[sym], interval,
+                                           is_buy, shown_lots)))
 
     if dirty:
         users.save_async()

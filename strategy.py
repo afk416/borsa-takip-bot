@@ -201,10 +201,13 @@ def check_signal(chart: dict, st: dict) -> dict:
 # ============================================================
 def backtest(chart: dict, st: dict) -> dict:
     """
-    Geçmiş veride sinyalleri simüle eder (canlı check_signal mantığıyla birebir):
-    İlk AL sinyalinde 1 lot girilir, SAT sinyalinde çıkılır = 1 işlem.
-    Açık kalan (SAT gelmemiş) pozisyon işlem sayılmaz.
-    Döner: {trades, wins, losses, total_pct, avg_pct, best, worst, open_pos, bars}
+    Geçmiş veride lot-biriktirme mantığıyla simüle eder (canlı motorla birebir):
+    HER AL sinyalinde +1 lot toplanır (o barın fiyatından), İLK SAT sinyalinde
+    biriken TÜM lotlar o barın fiyatından satılır. Pozisyon yokken SAT'a tepkisiz.
+    Her kapanan lot ayrı bir "işlem" sayılır (kendi alış fiyatına göre K/Z).
+    Açık kalan (SAT görmemiş) lotlar işlem sayılmaz.
+    Döner: {trades, wins, losses, total_pct, avg_pct, best, worst,
+            cycles, total_lots, open_lots, bars}
     """
     closes = chart["closes"]
     highs  = chart["highs"]
@@ -217,8 +220,10 @@ def backtest(chart: dict, st: dict) -> dict:
     need = max(period, int(st.get("vol_ma_len", config.VOLUME_MA_LEN)),
                int(st.get("range_len", config.RANGE_FILTER_LEN))) + 5
 
-    in_pos, entry = False, 0.0
-    trades = []   # her işlemin kar/zarar yüzdesi (1 lot, basit)
+    open_lots = []   # açık lotların alış fiyatları
+    trades = []      # kapanan her lotun kar/zarar yüzdesi
+    total_lots = 0   # toplam alınan lot (AL sinyali) sayısı
+    cycles = 0       # tamamlanan AL→SAT döngüsü sayısı
 
     for i in range(need, n):
         sub = {"closes": closes[:i + 1], "highs": highs[:i + 1],
@@ -227,23 +232,31 @@ def backtest(chart: dict, st: dict) -> dict:
         sig = check_signal(sub, st)
         if not sig:
             continue
-        if sig["side"] == "long" and not in_pos:
-            in_pos, entry = True, closes[i]
-        elif sig["side"] == "short" and in_pos and entry > 0:
-            in_pos = False
-            trades.append((closes[i] - entry) / entry * 100.0)
+        if sig["side"] == "long":
+            open_lots.append(closes[i])    # her AL'da +1 lot biriktir
+            total_lots += 1
+        elif sig["side"] == "short" and open_lots:
+            sat = closes[i]
+            for al in open_lots:           # ilk SAT'ta hepsini sat
+                if al > 0:
+                    trades.append((sat - al) / al * 100.0)
+            open_lots = []
+            cycles += 1
+        # short + açık lot yok → tepkisiz (asla short açmaz)
 
     wins = sum(1 for t in trades if t > 0)
     losses = len(trades) - wins
     total = sum(trades)
     return {
-        "trades":   len(trades),
-        "wins":     wins,
-        "losses":   losses,
-        "total_pct": total,
-        "avg_pct":  (total / len(trades)) if trades else 0.0,
-        "best":     max(trades) if trades else 0.0,
-        "worst":    min(trades) if trades else 0.0,
-        "open_pos": in_pos,
-        "bars":     n,
+        "trades":     len(trades),     # kapanan lot (= al-sat) sayısı
+        "wins":       wins,
+        "losses":     losses,
+        "total_pct":  total,
+        "avg_pct":    (total / len(trades)) if trades else 0.0,
+        "best":       max(trades) if trades else 0.0,
+        "worst":      min(trades) if trades else 0.0,
+        "cycles":     cycles,          # tamamlanan döngü sayısı
+        "total_lots": total_lots,      # toplam alınan lot
+        "open_lots":  len(open_lots),  # hâlâ açık (satılmamış) lot
+        "bars":       n,
     }
