@@ -1296,6 +1296,52 @@ async def _fetch_backtest_chart(sym, ikey):
     return None, ""
 
 
+def _format_analysis_table(rows, is_cycle, max_span, ikey, with_total):
+    """Hizalı analiz tablosu metni (kod bloğu içeriği). rows: [(name, res|None)].
+    Tek hisse (analiz et) ve liste analizinde AYNI format için ortak kullanılır."""
+    WN, WK, WZ, WO, WL, WH = 7, 5, 6, 9, 5, 11
+    head = (f"{'HİSSE':<{WN}}{'KAR':>{WK}}{'ZARAR':>{WZ}}"
+            f"{'K/Z%':>{WO}}{'LOT':>{WL}}{'HARCANAN':>{WH}}")
+    tbl = [head]
+    tot_w, tot_l, tot_lots, tot_spent, orans = 0, 0, 0, 0.0, []
+    for name, res in rows:
+        if res is None:
+            tbl.append(f"{name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}"
+                       f"{'-':>{WL}}{'-':>{WH}}  ⚪")
+            continue
+        if is_cycle:
+            w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
+        else:
+            w, l, p = res["wins"], res["losses"], res["total_pct"]
+        lots = res["trades"]          # kapatılan lot (açıklar hariç)
+        spent = res["total_spent"]
+        tot_w += w
+        tot_l += l
+        tot_lots += lots
+        tot_spent += spent
+        if w + l > 0:
+            orans.append(p)
+        em = "🟢" if p >= 0 else "🔴"
+        oran = ("+" if p >= 0 else "") + fmt_num(p, 1)
+        tbl.append(f"{name:<{WN}}{w:>{WK}}{l:>{WZ}}{oran:>{WO}}"
+                   f"{lots:>{WL}}{fmt_num(spent, 0):>{WH}}  {em}")
+
+    if with_total:
+        avg = (sum(orans) / len(orans)) if orans else 0.0
+        avg_s = ("+" if avg >= 0 else "") + fmt_num(avg, 1)
+        tem = "🟢" if avg >= 0 else "🔴"
+        tbl.append("─" * (WN + WK + WZ + WO + WL + WH))
+        tbl.append(f"{'TOPLAM':<{WN}}{tot_w:>{WK}}{tot_l:>{WZ}}"
+                   f"{avg_s:>{WO}}{tot_lots:>{WL}}{fmt_num(tot_spent, 0):>{WH}}  {tem}")
+
+    mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
+    ay = max_span / 30.0
+    donem = (f"~{max_span} gün (~{ay:.0f} ay)" if max_span else "")
+    return (f"{mod_adi} · {interval_label(ikey)} mum · {donem}\n"
+            f"LOT/HARCANAN = kapatılan lotlar (açıklar hariç)\n\n"
+            + "\n".join(tbl))
+
+
 async def analyze_watchlist(chat_id, user):
     """Listedeki tüm hisseleri tablo halinde analiz eder (hisse·karlı·zararlı·K/Z%)."""
     wl = user["watchlist"]
@@ -1328,50 +1374,10 @@ async def analyze_watchlist(chat_id, user):
         except Exception:
             pass
 
-    # Hizalı tablo (monospace kod bloğu). Emoji SON sütunda → tüm sütunlar
-    # (başlık dahil) aynı hizada başlar; emoji hizayı bozmaz, renk verir.
-    WN, WK, WZ, WO, WL, WH = 7, 5, 6, 9, 5, 11
-    head = (f"{'HİSSE':<{WN}}{'KAR':>{WK}}{'ZARAR':>{WZ}}"
-            f"{'K/Z%':>{WO}}{'LOT':>{WL}}{'HARCANAN':>{WH}}")
-    tbl = [head]
-    tot_w, tot_l, tot_lots, tot_spent, orans = 0, 0, 0, 0.0, []
-    for name, res in rows:
-        if res is None:
-            tbl.append(f"{name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}"
-                       f"{'-':>{WL}}{'-':>{WH}}  ⚪")
-            continue
-        if is_cycle:
-            w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
-        else:
-            w, l, p = res["wins"], res["losses"], res["total_pct"]
-        lots = res["trades"]          # KAPATILAN lot sayısı (açık olanlar hariç)
-        spent = res["total_spent"]    # kapatılan lotların alış fiyatları toplamı
-        tot_w += w
-        tot_l += l
-        tot_lots += lots
-        tot_spent += spent
-        if w + l > 0:
-            orans.append(p)
-        em = "🟢" if p >= 0 else "🔴"
-        oran = ("+" if p >= 0 else "") + fmt_num(p, 1)
-        tbl.append(f"{name:<{WN}}{w:>{WK}}{l:>{WZ}}{oran:>{WO}}"
-                   f"{lots:>{WL}}{fmt_num(spent, 0):>{WH}}  {em}")
-
-    avg = (sum(orans) / len(orans)) if orans else 0.0
-    avg_s = ("+" if avg >= 0 else "") + fmt_num(avg, 1)
-    tem = "🟢" if avg >= 0 else "🔴"
-    tbl.append("─" * (WN + WK + WZ + WO + WL + WH))
-    tbl.append(f"{'TOPLAM':<{WN}}{tot_w:>{WK}}{tot_l:>{WZ}}"
-               f"{avg_s:>{WO}}{tot_lots:>{WL}}{fmt_num(tot_spent, 0):>{WH}}  {tem}")
-
-    mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
-    ay = max_span / 30.0
-    donem = (f"~{max_span} gün (~{ay:.0f} ay)" if max_span else "")
-    inner = (f"{mod_adi} · {interval_label(ikey)} mum · {donem}\n"
-             f"LOT/HARCANAN = kapatılan lotlar (açıklar hariç)\n\n"
-             + "\n".join(tbl))
+    inner = _format_analysis_table(rows, is_cycle, max_span, ikey, with_total=True)
     try:
-        await msg.edit_text("```\n" + inner + "\n```", parse_mode="Markdown")
+        await msg.edit_text("📊 *Liste Analizi*\n```\n" + inner + "\n```",
+                            parse_mode="Markdown")
     except Exception as e:
         log.error(f"Liste analizi mesajı düzenlenemedi: {e}")
 
@@ -1399,71 +1405,15 @@ async def analyze_symbol(chat_id, user, sym, interval_key=None, edit_message=Non
         return
 
     res = await asyncio.to_thread(strategy.backtest, chart, st)
-
-    # Dönem etiketi: kaç mum, kaç gün (verinin kendisinden)
-    span_days = max(1, (chart["timestamps"][-1] - chart["timestamps"][0]) // 86400)
-    period_label = f"{src} · {iv_label} · {res['bars']} mum (~{span_days} gün)"
-
-    header = (f"📊 *{base_sym(sym)} — Geçmiş Analizi*\n"
-              f"_Ayar: RSI({st['rsi_period']}) · {st.get('signal_mode', 'Crossover')} · "
-              f"{period_label}_\n\n")
-
+    span = (chart["timestamps"][-1] - chart["timestamps"][0]) // 86400
     is_cycle = st.get("analysis_mode", "lot") == "islem"
-    # Moda göre metrik seç
-    if is_cycle:
-        n_trade = res["cycles"]
-        n_win, n_loss = res["cycle_wins"], res["cycle_losses"]
-        tot, avg = res["cycle_total_pct"], res["cycle_avg_pct"]
-        best, worst = res["cycle_best"], res["cycle_worst"]
-    else:
-        n_trade = res["trades"]
-        n_win, n_loss = res["wins"], res["losses"]
-        tot, avg = res["total_pct"], res["avg_pct"]
-        best, worst = res["best"], res["worst"]
 
-    if n_trade == 0:
-        body = ("Bu ayarlarla bu dönemde tamamlanmış (AL→SAT) işlem oluşmadı."
-                "\n_Daha uzun bir zaman dilimi (👇) ya da farklı mod/eşik deneyebilirsin._")
-        if res["open_lots"]:
-            body += (f"\n_(Şu an {res['open_lots']} AL sinyali birikmiş ama "
-                     "henüz SAT gelmemiş.)_")
-    else:
-        win_rate = n_win / n_trade * 100
-        tsign = "+" if tot >= 0 else ""
-        asign = "+" if avg >= 0 else ""
-        emoji = "🟢" if tot >= 0 else "🔴"
-        if is_cycle:
-            baslik = ("🔄 *İŞLEM BAZLI SAYIM*\n"
-                      "_Bir AL→SAT turu = 1 işlem; turdaki tüm lotların NET sonucu._\n\n"
-                      f"🔄 Toplam işlem: *{n_trade}*\n"
-                      f"🛒 Toplam alınan lot: *{res['total_lots']}*\n")
-            son = (f"_Başarı %{fmt_num(win_rate, 0)} · işlem başına ort. "
-                   f"{asign}{fmt_num(avg, 1)}%_\n"
-                   f"_En iyi işlem: +{fmt_num(best, 1)}% · en kötü: {fmt_num(worst, 1)}%_")
-        else:
-            baslik = ("🛒 *LOT BAZLI SAYIM*\n"
-                      "_Her AL'da +1 lot; her lot ayrı işlem sayılır._\n\n"
-                      f"🛒 Toplam alınan lot: *{res['total_lots']}*\n"
-                      f"🔄 Toplam Al-Sat (kapanan lot): *{n_trade}*\n")
-            son = (f"_Döngü: {res['cycles']} · başarı %{fmt_num(win_rate, 0)} · "
-                   f"lot başına ort. {asign}{fmt_num(avg, 1)}%_\n"
-                   f"_En iyi lot: +{fmt_num(best, 1)}% · en kötü: {fmt_num(worst, 1)}%_")
-        body = (
-            f"{baslik}"
-            f"🟢 Karlı işlem: *{n_win}*\n"
-            f"🔴 Zararlı işlem: *{n_loss}*\n"
-            f"{emoji} Kar/Zarar: *{tsign}{fmt_num(tot, 1)}%*\n\n"
-            f"{son}"
-        )
-        if res["open_lots"]:
-            body += (f"\n_(Şu an {res['open_lots']} lot açık — son AL'lar henüz "
-                     "satılmadı, dahil değil.)_")
-
-    note = ("\n\n_⚠️ Geçmiş performans geleceği garanti etmez. Komisyon/vergi hariç. "
-            "Farklı zaman dilimi için aşağıdaki butonları kullan (15dk Yahoo'da en fazla "
-            "60 gün; daha uzun geçmiş için 1 saat/günlük)._")
+    # Liste Analizi ile AYNI tablo formatı (tek satır, TOPLAM yok)
+    inner = _format_analysis_table([(base_sym(sym), res)], is_cycle, span, ikey,
+                                   with_total=False)
+    text = f"📊 *{base_sym(sym)} — Analiz*\n```\n{inner}\n```"
     try:
-        await msg.edit_text(header + body + note, parse_mode="Markdown",
+        await msg.edit_text(text, parse_mode="Markdown",
                             reply_markup=analyze_period_buttons(sym, ikey))
     except Exception as e:
         log.error(f"Analiz mesajı düzenlenemedi: {e}")
