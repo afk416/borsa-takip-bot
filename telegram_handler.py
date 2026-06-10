@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup,
-    ReplyKeyboardMarkup, KeyboardButton, BotCommand,
+    ReplyKeyboardMarkup, KeyboardButton, BotCommand, ForceReply,
 )
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -520,7 +520,7 @@ async def show_symbol_card(chat_id, user, quote: dict):
                                  callback_data=f"s:{'rm' if in_list else 'add'}:{sym}"),
             InlineKeyboardButton("🔔 Alarm Kur", callback_data=f"a:new:{sym}"),
         ],
-        [InlineKeyboardButton("💼 Portföye Ekle", callback_data=f"p:start:{sym}")],
+        [InlineKeyboardButton("💼 Portföye Ekle", callback_data=f"p:add1:{sym}")],
     ]
     markup = InlineKeyboardMarkup(buttons)
 
@@ -579,98 +579,190 @@ def alert_type_menu(sym: str) -> InlineKeyboardMarkup:
 # ============================================================
 # PORTFÖY
 # ============================================================
-async def show_portfolio(update: Update, user):
-    pf = user["portfolio"]
-    rows = [[InlineKeyboardButton("➕ Pozisyon Ekle", callback_data="p:add")]]
-    if not pf:
-        await update.message.reply_text(
-            "💼 *Portföyün boş.*\n\n"
-            "Midas'ta (veya başka aracı kurumda) aldığın hisseleri buraya girersen "
-            "anlık kâr/zararını takip ederim.\n\n"
-            "Eklemek için butona dokun, sonra şu formatta yaz:\n"
-            "`THYAO 10 230,50`  →  _10 adet, 230,50₺ maliyet_",
-            parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
-        return
+def _pos_metrics(pos, quote) -> dict:
+    qty, cost = pos["qty"], pos["cost"]
+    price = quote["price"]
+    value_now  = qty * price
+    value_cost = qty * cost
+    pnl = value_now - value_cost
+    return {
+        "qty": qty, "cost": cost, "price": price, "cur": quote["currency"],
+        "value_now": value_now, "value_cost": value_cost, "pnl": pnl,
+        "pnl_pct": (pnl / value_cost * 100) if value_cost else 0.0,
+    }
 
-    msg = await update.message.reply_text("💼 Hesaplanıyor...")
-    lines = ["💼 *Portföyüm*\n"]
-    totals = {}   # currency -> [maliyet, güncel]
+
+def _qty_fmt(qty) -> str:
+    return fmt_num(qty, 0 if qty == int(qty) else 2)
+
+
+async def build_portfolio_view(user):
+    """Portföy ana ekranı: her hisse grid butonu (🟢/🔴 isim + K/Z%)."""
+    pf = user["portfolio"]
+    if not pf:
+        text = ("💼 *Portföyün boş.*\n\n"
+                "Midas'ta (veya başka aracı kurumda) aldığın hisseleri buraya girersen "
+                "anlık kâr/zararını takip ederim.")
+        markup = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("➕ Yeni Pozisyon Ekle", callback_data="p:new")]])
+        return text, markup
+
+    quotes = await asyncio.to_thread(_collect_quotes, list(pf.keys()))
+    rows, row, totals = [], [], {}
     for sym, pos in pf.items():
-        quote = await asyncio.to_thread(yahoo_client.get_quote, sym)
-        b = base_sym(sym)
-        if not quote:
-            lines.append(f"▪️ *{b}* — veri alınamadı")
-            continue
-        qty, cost = pos["qty"], pos["cost"]
-        cur = quote["currency"]
-        value_now = qty * quote["price"]
-        value_cost = qty * cost
-        pnl = value_now - value_cost
-        pnl_pct = (pnl / value_cost * 100) if value_cost else 0
-        t = totals.setdefault(cur, [0.0, 0.0])
-        t[0] += value_cost
-        t[1] += value_now
-        emoji = "🟢" if pnl >= 0 else "🔴"
-        sign = "+" if pnl >= 0 else ""
-        lines.append(
-            f"{emoji} *{b}* — {fmt_num(qty, 0 if qty == int(qty) else 2)} adet\n"
-            f"   Maliyet {fmt_price(cost, cur)} → Şu an {fmt_price(quote['price'], cur)}\n"
-            f"   K/Z: {sign}{fmt_num(pnl)}{cur_suffix(cur)} ({fmt_pct(pnl_pct)})"
-        )
-    lines.append("")
+        q = quotes.get(sym)
+        if not q:
+            label = f"▪️ {base_sym(sym)}"
+        else:
+            m = _pos_metrics(pos, q)
+            t = totals.setdefault(m["cur"], [0.0, 0.0])
+            t[0] += m["value_cost"]
+            t[1] += m["value_now"]
+            emoji = "🟢" if m["pnl"] >= 0 else "🔴"
+            sign = "+" if m["pnl_pct"] >= 0 else ""
+            label = f"{emoji} {base_sym(sym)}  {sign}{fmt_num(m['pnl_pct'], 1)}%"
+        row.append(InlineKeyboardButton(label, callback_data=f"p:show:{sym}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    rows.append([InlineKeyboardButton("➕ Yeni Pozisyon Ekle", callback_data="p:new")])
+
+    lines = ["💼 *Portföyüm*\n"]
     for cur, (vc, vn) in totals.items():
         pnl = vn - vc
         sign = "+" if pnl >= 0 else ""
         pct = (pnl / vc * 100) if vc else 0
-        lines.append(f"*Toplam ({cur}):* {fmt_num(vn)}{cur_suffix(cur)}  "
+        emoji = "🟢" if pnl >= 0 else "🔴"
+        lines.append(f"{emoji} *Toplam ({cur}):* {fmt_num(vn)}{cur_suffix(cur)} · "
                      f"K/Z {sign}{fmt_num(pnl)}{cur_suffix(cur)} ({fmt_pct(pct)})")
-
-    for sym in pf:
-        rows.append([InlineKeyboardButton(f"🗑 {base_sym(sym)} pozisyonunu sil",
-                                          callback_data=f"p:rm:{sym}")])
-    await msg.edit_text("\n".join(lines), parse_mode="Markdown",
-                        reply_markup=InlineKeyboardMarkup(rows))
+    lines.append("\n_Detay ve işlem için hisseye dokun._")
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
 
 
-async def handle_portfolio_input(update: Update, user, text: str):
-    """'THYAO 10 230,50' formatını işler."""
+async def build_position_detail(user, sym):
+    """Hisse detayı: adet/maliyet/şimdi/KZ kutucukları + Ekle/Sat."""
+    pos = user["portfolio"].get(sym)
+    if not pos:
+        return None, None
+    quote = await asyncio.to_thread(yahoo_client.get_quote, sym)
+    if not quote:
+        return f"❌ {base_sym(sym)} verisi alınamadı.", InlineKeyboardMarkup(
+            [[InlineKeyboardButton("‹ Portföy", callback_data="p:back")]])
+    m = _pos_metrics(pos, quote)
+    emoji = "🟢" if m["pnl"] >= 0 else "🔴"
+    sign = "+" if m["pnl"] >= 0 else ""
+    rows = [
+        [InlineKeyboardButton(f"📦 Adet: {_qty_fmt(m['qty'])}", callback_data="p:noop"),
+         InlineKeyboardButton(f"💵 Maliyet: {fmt_price(m['cost'], m['cur'])}",
+                              callback_data="p:noop")],
+        [InlineKeyboardButton(f"📈 Şimdi: {fmt_price(m['price'], m['cur'])}",
+                              callback_data="p:noop"),
+         InlineKeyboardButton(f"{emoji} K/Z: {sign}{fmt_num(m['pnl_pct'], 1)}%",
+                              callback_data="p:noop")],
+        [InlineKeyboardButton("➕ Ekle", callback_data=f"p:add1:{sym}"),
+         InlineKeyboardButton("💸 Sat", callback_data=f"p:sell:{sym}")],
+        [InlineKeyboardButton("‹ Portföy", callback_data="p:back")],
+    ]
+    text = (f"*{base_sym(sym)}* — {md_escape(quote['name'])}\n"
+            f"Toplam değer: *{fmt_price(m['value_now'], m['cur'])}*  "
+            f"({sign}{fmt_num(m['pnl'])}{cur_suffix(m['cur'])} · {fmt_pct(m['pnl_pct'])})")
+    return text, InlineKeyboardMarkup(rows)
+
+
+def build_sell_menu(user, sym):
+    """Satış oranı menüsü: %15 / %25 / %50 / %75 / %100."""
+    pos = user["portfolio"].get(sym)
+    if not pos:
+        return None, None
+    rows = [
+        [InlineKeyboardButton(f"%{p}", callback_data=f"p:sp:{sym}:{p}")
+         for p in (15, 25, 50, 75)],
+        [InlineKeyboardButton("💯 Tümünü Sat (%100)", callback_data=f"p:sp:{sym}:100")],
+        [InlineKeyboardButton("‹ Geri", callback_data=f"p:show:{sym}")],
+    ]
+    text = (f"💸 *{base_sym(sym)}* — ne kadarını satıyorsun?\n"
+            f"Elinde *{_qty_fmt(pos['qty'])}* adet var. Oran seç:")
+    return text, InlineKeyboardMarkup(rows)
+
+
+async def show_portfolio(update: Update, user):
+    msg = await update.message.reply_text("💼 Hesaplanıyor...")
+    text, markup = await build_portfolio_view(user)
+    await msg.edit_text(text, parse_mode="Markdown", reply_markup=markup)
+
+
+def apply_sell(user, sym, pct: int):
+    """Pozisyonun pct%'ini satar. Satılan adedi döner (yoksa None)."""
+    pos = user["portfolio"].get(sym)
+    if not pos:
+        return None
+    qty = pos["qty"]
+    if pct >= 100:
+        sold = qty
+        del user["portfolio"][sym]
+    else:
+        sold = qty * pct / 100.0
+        pos["qty"] = round(qty - sold, 6)
+    user.get("signal_state", {})  # dokunma; sinyal portföyden bağımsız
+    users.save_async()
+    return sold
+
+
+async def handle_portfolio_new(update: Update, user, text: str):
+    """'THYAO 10 230,50' → yeni/ek pozisyon."""
     parts = text.split()
     if len(parts) != 3:
         await update.message.reply_text(
             "Format: `SEMBOL ADET MALİYET`\nÖrnek: `THYAO 10 230,50`",
             parse_mode="Markdown")
-        return False
-    qty = tr_float(parts[1])
-    cost = tr_float(parts[2])
-    if qty is None or cost is None or qty <= 0 or cost <= 0:
-        await update.message.reply_text("❌ Adet ve maliyet sayı olmalı. Örnek: `THYAO 10 230,50`",
-                                        parse_mode="Markdown")
-        return False
+        return
     quote = await asyncio.to_thread(yahoo_client.resolve_symbol, parts[0])
     if not quote:
         await update.message.reply_text(f"❌ `{parts[0].upper()}` bulunamadı.",
                                         parse_mode="Markdown")
-        return False
+        return
     users.remember_symbol(quote)
-    sym = quote["symbol"]
+    await _apply_add(update, user, quote["symbol"], parts[1], parts[2])
+
+
+async def handle_portfolio_add_one(update: Update, user, sym, text: str):
+    """Belli hisseye 'ADET MALİYET' ekler."""
+    parts = text.split()
+    if len(parts) != 2:
+        await update.message.reply_text(
+            "Format: `ADET MALİYET`\nÖrnek: `10 230,50`", parse_mode="Markdown")
+        return
+    await _apply_add(update, user, sym, parts[0], parts[1])
+
+
+async def _apply_add(update, user, sym, qty_s, cost_s):
+    qty = tr_float(qty_s)
+    cost = tr_float(cost_s)
+    if qty is None or cost is None or qty <= 0 or cost <= 0:
+        await update.message.reply_text("❌ Adet ve maliyet sayı olmalı. Örn: `10 230,50`",
+                                        parse_mode="Markdown")
+        return
     pf = user["portfolio"]
     if sym in pf:
         old = pf[sym]
         total_qty = old["qty"] + qty
         avg = (old["qty"] * old["cost"] + qty * cost) / total_qty
-        pf[sym] = {"qty": total_qty, "cost": round(avg, 4)}
-        note = f"\n_(Mevcut pozisyonla birleştirildi: {fmt_num(total_qty, 0)} adet, " \
-               f"ort. maliyet {fmt_num(avg)})_"
+        pf[sym] = {"qty": round(total_qty, 6), "cost": round(avg, 4)}
+        note = (f"\n_(Birleştirildi: {_qty_fmt(total_qty)} adet, "
+                f"ort. maliyet {fmt_num(avg)})_")
     else:
         pf[sym] = {"qty": qty, "cost": cost}
         note = ""
     user["pending"] = None
     users.save_async()
+    text, markup = await build_position_detail(user, sym)
     await update.message.reply_text(
-        f"✅ *{base_sym(sym)}* portföye eklendi: {fmt_num(qty, 0)} adet @ {fmt_num(cost)}{note}\n\n"
-        f"{BTN_PORTFOLIO} ile kâr/zararı görebilirsin.",
+        f"✅ *{base_sym(sym)}* eklendi: {_qty_fmt(qty)} adet @ {fmt_num(cost)}{note}",
         parse_mode="Markdown")
-    return True
+    if text:
+        await _send(update.effective_chat.id, text, markup=markup)
 
 
 # ============================================================
@@ -800,8 +892,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
                 reply_markup=alert_type_menu(quote["symbol"]))
             return
-        if action == "port_add":
-            await handle_portfolio_input(update, user, text)
+        if action == "port_new":
+            await handle_portfolio_new(update, user, text)
+            return
+        if action == "port_one":
+            await handle_portfolio_add_one(update, user, pending["sym"], text)
             return
         user["pending"] = None   # tanınmayan pending'i temizle
 
@@ -949,32 +1044,67 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # ---- Portföy ----
         elif ns == "p":
             action = parts[1]
-            if action == "add":
+            if action == "noop":
                 await q.answer()
-                user["pending"] = {"a": "port_add"}
-                users.save_async()
-                await _send(chat_id,
-                            "💼 Pozisyonu şu formatta yaz:\n"
-                            "`SEMBOL ADET MALİYET`\n\n"
-                            "Örnek: `THYAO 10 230,50`")
-            elif action == "start":
+            elif action == "back":
+                await q.answer()
+                text, markup = await build_portfolio_view(user)
+                await q.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
+            elif action == "show":
                 sym = parts[2]
                 await q.answer()
-                user["pending"] = {"a": "port_add"}
-                users.save_async()
-                await _send(chat_id,
-                            f"💼 *{base_sym(sym)}* için adet ve maliyeti yaz:\n"
-                            f"`{base_sym(sym)} ADET MALİYET`\n\n"
-                            f"Örnek: `{base_sym(sym)} 10 230,50`")
-            elif action == "rm":
+                text, markup = await build_position_detail(user, sym)
+                if not text:
+                    text, markup = await build_portfolio_view(user)
+                await q.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
+            elif action == "sell":
                 sym = parts[2]
-                if sym in user["portfolio"]:
-                    del user["portfolio"][sym]
-                    users.save_async()
-                    await q.answer(f"🗑 {base_sym(sym)} silindi")
-                    await _send(chat_id, f"🗑 *{base_sym(sym)}* portföyünden silindi.")
+                await q.answer()
+                text, markup = build_sell_menu(user, sym)
+                if not text:
+                    await q.answer("Pozisyon yok", show_alert=True)
                 else:
-                    await q.answer("Zaten silinmiş")
+                    await q.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
+            elif action == "sp":      # satış uygula: p:sp:SYM:PCT
+                sym, pct = parts[2], int(parts[3])
+                pos = user["portfolio"].get(sym)
+                quote = await asyncio.to_thread(yahoo_client.get_quote, sym) if pos else None
+                sold = apply_sell(user, sym, pct)
+                if sold is None:
+                    await q.answer("Pozisyon yok", show_alert=True)
+                else:
+                    await q.answer(f"💸 %{pct} satıldı")
+                    note = ""
+                    if quote:
+                        note = (f"\nSatış değeri ≈ "
+                                f"{fmt_price(sold * quote['price'], quote['currency'])}")
+                    await _send(chat_id,
+                                f"💸 *{base_sym(sym)}* — %{pct} satıldı "
+                                f"({_qty_fmt(sold)} adet).{note}\n"
+                                f"_İşlemi Midas'tan gerçekleştirmeyi unutma._")
+                    text, markup = await build_portfolio_view(user)
+                    await q.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
+            elif action == "new":     # yeni pozisyon (sembollü)
+                await q.answer()
+                user["pending"] = {"a": "port_new"}
+                users.save_async()
+                await _app.bot.send_message(
+                    chat_id=chat_id,
+                    text="💼 Yeni pozisyon — şu formatta yaz:\n`SEMBOL ADET MALİYET`\n"
+                         "Örnek: `THYAO 10 230,50`",
+                    parse_mode="Markdown",
+                    reply_markup=ForceReply(input_field_placeholder="THYAO 10 230,50"))
+            elif action == "add1":    # belli hisseye ekle
+                sym = parts[2]
+                await q.answer()
+                user["pending"] = {"a": "port_one", "sym": sym}
+                users.save_async()
+                await _app.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"➕ *{base_sym(sym)}* — eklenecek adet ve maliyeti yaz:\n"
+                         f"`ADET MALİYET`\nÖrnek: `10 230,50`",
+                    parse_mode="Markdown",
+                    reply_markup=ForceReply(input_field_placeholder="10 230,50"))
 
         # ---- Ayarlar ----
         elif ns == "c":
