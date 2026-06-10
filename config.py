@@ -46,6 +46,7 @@ DEFAULT_SETTINGS = {
     "min_range":    0.1,      # Min Ort. Range (%)
     "notif":       True,
     "signals":     False,     # otomatik AL/SAT sinyal modu (watchlist taraması)
+    "analysis_mode": "lot",   # analiz sayımı: "lot" (her lot ayrı) | "islem" (döngü net)
 }
 
 # ============================================================

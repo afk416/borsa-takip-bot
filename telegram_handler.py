@@ -808,6 +808,7 @@ def settings_text(user) -> str:
         f"Pencere: *{st.get('range_len', 20)}* mum · "
         f"Min Range: *%{st.get('min_range', 0.1)}*\n\n"
         "🔔 *Genel*\n"
+        f"Analiz Sayımı: *{'İşlem bazlı 🔄' if st.get('analysis_mode') == 'islem' else 'Lot bazlı 🛒'}*\n"
         f"Bildirimler: *{'Açık 🔔' if st['notif'] else 'Kapalı 🔕'}*\n"
         f"Otomatik AL/SAT Sinyali: *{'Açık 📡' if st.get('signals') else 'Kapalı'}*\n\n"
         "_Crossover olunca, hacim ve volatilite filtrelerinden geçen sinyaller "
@@ -846,6 +847,11 @@ def settings_keyboard(user) -> InlineKeyboardMarkup:
             callback_data="c:rangef:x")],
         opt_row("rfl", [10, 20, 30, 50], st.get("range_len", 20)),
         opt_row("mrp", [0.1, 0.3, 0.5, 1.0], st.get("min_range", 0.1), fmt=lambda x: f"%{x}"),
+        # — ANALİZ —
+        [InlineKeyboardButton(
+            "📐 Analiz Sayımı: " + ("İşlem bazlı 🔄" if st.get("analysis_mode") == "islem"
+                                     else "Lot bazlı 🛒"),
+            callback_data="c:amode:x")],
         # — GENEL —
         [InlineKeyboardButton(
             "🔕 Bildirimleri Kapat" if st["notif"] else "🔔 Bildirimleri Aç",
@@ -1164,6 +1170,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 st["range_len"] = int(parts[2])
             elif key == "mrp":
                 st["min_range"] = float(parts[2])
+            elif key == "amode":
+                st["analysis_mode"] = "lot" if st.get("analysis_mode") == "islem" else "islem"
             elif key == "notif":
                 st["notif"] = not st["notif"]
             elif key == "signals":
@@ -1271,28 +1279,52 @@ async def analyze_symbol(chat_id, user, sym, interval_key=None, edit_message=Non
               f"_Ayar: RSI({st['rsi_period']}) · {st.get('signal_mode', 'Crossover')} · "
               f"{period_label}_\n\n")
 
-    if res["trades"] == 0:
+    is_cycle = st.get("analysis_mode", "lot") == "islem"
+    # Moda göre metrik seç
+    if is_cycle:
+        n_trade = res["cycles"]
+        n_win, n_loss = res["cycle_wins"], res["cycle_losses"]
+        tot, avg = res["cycle_total_pct"], res["cycle_avg_pct"]
+        best, worst = res["cycle_best"], res["cycle_worst"]
+    else:
+        n_trade = res["trades"]
+        n_win, n_loss = res["wins"], res["losses"]
+        tot, avg = res["total_pct"], res["avg_pct"]
+        best, worst = res["best"], res["worst"]
+
+    if n_trade == 0:
         body = ("Bu ayarlarla bu dönemde tamamlanmış (AL→SAT) işlem oluşmadı."
                 "\n_Daha uzun bir zaman dilimi (👇) ya da farklı mod/eşik deneyebilirsin._")
         if res["open_lots"]:
             body += (f"\n_(Şu an {res['open_lots']} AL sinyali birikmiş ama "
                      "henüz SAT gelmemiş.)_")
     else:
-        win_rate = res["wins"] / res["trades"] * 100
-        tsign = "+" if res["total_pct"] >= 0 else ""
-        asign = "+" if res["avg_pct"] >= 0 else ""
-        emoji = "🟢" if res["total_pct"] >= 0 else "🔴"
+        win_rate = n_win / n_trade * 100
+        tsign = "+" if tot >= 0 else ""
+        asign = "+" if avg >= 0 else ""
+        emoji = "🟢" if tot >= 0 else "🔴"
+        if is_cycle:
+            baslik = ("🔄 *İŞLEM BAZLI SAYIM*\n"
+                      "_Bir AL→SAT turu = 1 işlem; turdaki tüm lotların NET sonucu._\n\n"
+                      f"🔄 Toplam işlem: *{n_trade}*\n"
+                      f"🛒 Toplam alınan lot: *{res['total_lots']}*\n")
+            son = (f"_Başarı %{fmt_num(win_rate, 0)} · işlem başına ort. "
+                   f"{asign}{fmt_num(avg, 1)}%_\n"
+                   f"_En iyi işlem: +{fmt_num(best, 1)}% · en kötü: {fmt_num(worst, 1)}%_")
+        else:
+            baslik = ("🛒 *LOT BAZLI SAYIM*\n"
+                      "_Her AL'da +1 lot; her lot ayrı işlem sayılır._\n\n"
+                      f"🛒 Toplam alınan lot: *{res['total_lots']}*\n"
+                      f"🔄 Toplam Al-Sat (kapanan lot): *{n_trade}*\n")
+            son = (f"_Döngü: {res['cycles']} · başarı %{fmt_num(win_rate, 0)} · "
+                   f"lot başına ort. {asign}{fmt_num(avg, 1)}%_\n"
+                   f"_En iyi lot: +{fmt_num(best, 1)}% · en kötü: {fmt_num(worst, 1)}%_")
         body = (
-            "🛒 *LOT BİRİKTİRME MANTIĞI*\n"
-            "_Her AL'da +1 lot; ilk SAT'ta biriken tüm lotlar satılır._\n\n"
-            f"🛒 Toplam alınan lot: *{res['total_lots']}*\n"
-            f"🔄 Toplam Al-Sat (kapanan lot): *{res['trades']}*\n"
-            f"🟢 Karlı işlem: *{res['wins']}*\n"
-            f"🔴 Zararlı işlem: *{res['losses']}*\n"
-            f"{emoji} Kar/Zarar: *{tsign}{fmt_num(res['total_pct'], 1)}%*\n\n"
-            f"_Döngü (al-sat turu): {res['cycles']} · başarı %{fmt_num(win_rate, 0)} · "
-            f"lot başına ort. {asign}{fmt_num(res['avg_pct'], 1)}%_\n"
-            f"_En iyi lot: +{fmt_num(res['best'], 1)}% · en kötü: {fmt_num(res['worst'], 1)}%_"
+            f"{baslik}"
+            f"🟢 Karlı işlem: *{n_win}*\n"
+            f"🔴 Zararlı işlem: *{n_loss}*\n"
+            f"{emoji} Kar/Zarar: *{tsign}{fmt_num(tot, 1)}%*\n\n"
+            f"{son}"
         )
         if res["open_lots"]:
             body += (f"\n_(Şu an {res['open_lots']} lot açık — son AL'lar henüz "

@@ -233,10 +233,10 @@ def backtest(chart: dict, st: dict) -> dict:
     rsis = rsi_series(closes, period)
     rmas = ema_series(rsis, smooth)
 
-    open_lots = []   # açık lotların alış fiyatları
-    trades = []      # kapanan her lotun kar/zarar yüzdesi
-    total_lots = 0   # toplam alınan lot (AL sinyali) sayısı
-    cycles = 0       # tamamlanan AL→SAT döngüsü sayısı
+    open_lots = []     # açık lotların alış fiyatları
+    trades = []        # LOT bazlı: kapanan her lotun kar/zarar yüzdesi
+    cycle_trades = []  # İŞLEM bazlı: her AL→SAT döngüsünün NET kar/zarar yüzdesi
+    total_lots = 0     # toplam alınan lot (AL sinyali) sayısı
 
     for i in range(need, n):
         rn, rp = rsis[i], rsis[i - 1]
@@ -276,17 +276,26 @@ def backtest(chart: dict, st: dict) -> dict:
             total_lots += 1
         elif short_sig and open_lots:
             sat = closes[i]
-            for al in open_lots:           # ilk SAT'ta hepsini sat
-                if al > 0:
-                    trades.append((sat - al) / al * 100.0)
+            valid = [al for al in open_lots if al > 0]
+            # LOT bazlı: her lot ayrı işlem
+            for al in valid:
+                trades.append((sat - al) / al * 100.0)
+            # İŞLEM bazlı: bu döngünün net sonucu (sermaye ağırlıklı)
+            if valid:
+                cost = sum(valid)
+                proceeds = sat * len(valid)
+                cycle_trades.append((proceeds - cost) / cost * 100.0)
             open_lots = []
-            cycles += 1
         # short + açık lot yok → tepkisiz (asla short açmaz)
 
     wins = sum(1 for t in trades if t > 0)
     losses = len(trades) - wins
     total = sum(trades)
+    c_wins = sum(1 for c in cycle_trades if c > 0)
+    c_losses = len(cycle_trades) - c_wins
+    c_total = sum(cycle_trades)
     return {
+        # LOT bazlı (her lot ayrı işlem)
         "trades":     len(trades),     # kapanan lot (= al-sat) sayısı
         "wins":       wins,
         "losses":     losses,
@@ -294,7 +303,15 @@ def backtest(chart: dict, st: dict) -> dict:
         "avg_pct":    (total / len(trades)) if trades else 0.0,
         "best":       max(trades) if trades else 0.0,
         "worst":      min(trades) if trades else 0.0,
-        "cycles":     cycles,          # tamamlanan döngü sayısı
+        # İŞLEM bazlı (her AL→SAT döngüsü = 1 işlem, net sonuç)
+        "cycles":       len(cycle_trades),   # tamamlanan döngü/işlem sayısı
+        "cycle_wins":   c_wins,
+        "cycle_losses": c_losses,
+        "cycle_total_pct": c_total,
+        "cycle_avg_pct": (c_total / len(cycle_trades)) if cycle_trades else 0.0,
+        "cycle_best":   max(cycle_trades) if cycle_trades else 0.0,
+        "cycle_worst":  min(cycle_trades) if cycle_trades else 0.0,
+        # ortak
         "total_lots": total_lots,      # toplam alınan lot
         "open_lots":  len(open_lots),  # hâlâ açık (satılmamış) lot
         "bars":       n,
