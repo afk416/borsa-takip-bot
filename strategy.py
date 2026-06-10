@@ -319,3 +319,64 @@ def backtest(chart: dict, st: dict) -> dict:
         "open_lots":   len(open_lots),  # hâlâ açık (satılmamış) lot
         "bars":        n,
     }
+
+
+def open_lot_timeline(chart: dict, st: dict):
+    """Her bar için o an AÇIK (alınmış ama satılmamış) lot sayısı.
+    Döner: [(timestamp, open_count), ...]. backtest ile aynı sinyal mantığı."""
+    closes = chart["closes"]
+    highs  = chart["highs"]
+    lows   = chart["lows"]
+    vols   = chart["volumes"]
+    ts     = chart["timestamps"]
+    n = len(closes)
+
+    period = int(st.get("rsi_period", 21))
+    smooth = int(st.get("rsi_smooth", 1))
+    low    = float(st.get("rsi_low", 25))
+    high   = float(st.get("rsi_high", 78))
+    mode   = st.get("signal_mode", "Crossover")
+    vf  = st.get("vol_filter", True)
+    vml = int(st.get("vol_ma_len", config.VOLUME_MA_LEN))
+    vmu = float(st.get("vol_mult", config.VOLUME_MULTIPLIER))
+    rf  = st.get("range_filter", True)
+    rl  = int(st.get("range_len", config.RANGE_FILTER_LEN))
+    mr  = float(st.get("min_range", config.MIN_RANGE_PCT))
+    need = max(period, vml, rl) + 5
+
+    rsis = rsi_series(closes, period)
+    rmas = ema_series(rsis, smooth)
+
+    open_count = 0
+    out = []
+    for i in range(n):
+        if i >= need:
+            rn, rp = rsis[i], rsis[i - 1]
+            mn, mp = rmas[i], rmas[i - 1]
+            if not (rn is None or rp is None or mn is None or mp is None):
+                if mode == "RSI 50 Cross":
+                    ls, ss = _crossover(mp, mn, 50, 50), _crossunder(mp, mn, 50, 50)
+                elif mode == "RSI EMA Cross":
+                    ls, ss = _crossover(rp, rn, mp, mn), _crossunder(rp, rn, mp, mn)
+                else:
+                    ls, ss = _crossover(mp, mn, low, low), _crossunder(mp, mn, high, high)
+                if ls or ss:
+                    ok = True
+                    if vf:
+                        win = [v for v in vols[i - vml:i] if v is not None]
+                        if win:
+                            vma = sum(win) / len(win)
+                            if vma > 0 and not (vols[i] > vma * vmu):
+                                ok = False
+                    if ok and rf:
+                        rngs = [(highs[j] - lows[j]) / closes[j] * 100
+                                for j in range(i - rl, i) if closes[j]]
+                        if rngs and (sum(rngs) / len(rngs)) < mr:
+                            ok = False
+                    if ok:
+                        if ls:
+                            open_count += 1
+                        elif ss and open_count > 0:
+                            open_count = 0   # ilk SAT'ta tüm lotlar kapanır
+        out.append((ts[i], open_count))
+    return out

@@ -35,10 +35,11 @@ BTN_ALERTS    = "🔔 Alarmlarım"
 BTN_ADD       = "➕ Hisse Ekle"
 BTN_SETTINGS  = "⚙️ İndikatör Ayarları"
 BTN_SUMMARY   = "🧾 İşlem Özeti"
+BTN_OPENLOT   = "📈 Açık Lot Grafiği"
 BTN_HELP      = "❓ Yardım"
 
 MENU_BUTTONS = {BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
-                BTN_ADD, BTN_SETTINGS, BTN_SUMMARY, BTN_HELP}
+                BTN_ADD, BTN_SETTINGS, BTN_SUMMARY, BTN_OPENLOT, BTN_HELP}
 
 
 # ============================================================
@@ -50,7 +51,7 @@ def main_menu_keyboard():
             [KeyboardButton(BTN_RSI),       KeyboardButton(BTN_WATCHLIST)],
             [KeyboardButton(BTN_PORTFOLIO), KeyboardButton(BTN_ADD)],
             [KeyboardButton(BTN_SETTINGS),  KeyboardButton(BTN_SUMMARY)],
-            [KeyboardButton(BTN_HELP)],
+            [KeyboardButton(BTN_OPENLOT),   KeyboardButton(BTN_HELP)],
         ],
         resize_keyboard=True,
     )
@@ -976,6 +977,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_settings(update, user)
     elif text == BTN_SUMMARY:
         await show_trade_summary(update, user)
+    elif text == BTN_OPENLOT:
+        await show_openlot_chart(update, user)
     elif text == BTN_HELP:
         await cmd_help(update, context)
     else:
@@ -1340,6 +1343,102 @@ def _format_analysis_table(rows, is_cycle, max_span, ikey, with_total):
     return (f"{mod_adi} · {interval_label(ikey)} mum · {donem}\n"
             f"LOT/HARCANAN = kapatılan lotlar (açıklar hariç)\n\n"
             + "\n".join(tbl))
+
+
+def build_openlot_chart_url(values, title) -> str:
+    """Açık lot zaman serisi için quickchart alan grafiği URL'si."""
+    cfg = {
+        "type": "line",
+        "data": {
+            "labels": list(range(len(values))),
+            "datasets": [{
+                "label": "Açık Lot",
+                "data": values,
+                "borderColor": "#2563eb",
+                "backgroundColor": "rgba(37,99,235,0.30)",
+                "fill": True,
+                "pointRadius": 0,
+                "borderWidth": 2,
+                "stepped": True,
+            }],
+        },
+        "options": {
+            "plugins": {"legend": {"display": False},
+                        "title": {"display": True, "text": title}},
+            "scales": {
+                "x": {"display": False},
+                "y": {"beginAtZero": True,
+                      "title": {"display": True, "text": "Açık lot"},
+                      "ticks": {"precision": 0}},
+            },
+        },
+    }
+    encoded = urllib.parse.quote(json.dumps(cfg, separators=(",", ":")))
+    return f"https://quickchart.io/chart?w=700&h=350&bkg=white&c={encoded}"
+
+
+async def show_openlot_chart(update: Update, user):
+    """Watchlist'teki tüm hisselerin AYNI ANDA açık (satılmamış) toplam lot sayısının
+    zaman içindeki grafiği. X: günler, Y: o gün toplam açık lot."""
+    wl = user["watchlist"]
+    if not wl:
+        await update.message.reply_text(
+            "📈 Listen boş. Önce hisse ekle.", parse_mode="Markdown")
+        return
+    st = user["settings"]
+    ikey = st.get("interval", "gunluk")
+    chat_id = update.effective_chat.id
+
+    msg = await update.message.reply_text(f"📈 Açık lot grafiği hazırlanıyor (0/{len(wl)})...")
+
+    daily = []     # her hisse için {gün: o günün son barındaki açık lot}
+    max_span = 0
+    for idx, sym in enumerate(wl, 1):
+        chart, _src = await _fetch_backtest_chart(sym, ikey)
+        if chart:
+            max_span = max(max_span,
+                           (chart["timestamps"][-1] - chart["timestamps"][0]) // 86400)
+            tl = await asyncio.to_thread(strategy.open_lot_timeline, chart, st)
+            d = {}
+            for ts, oc in tl:
+                d[ts // 86400] = oc   # gün indeksi → son değer (sıralı)
+            if d:
+                daily.append(d)
+        try:
+            await msg.edit_text(f"📈 Açık lot grafiği hazırlanıyor ({idx}/{len(wl)})...")
+        except Exception:
+            pass
+
+    if not daily:
+        await msg.edit_text("📈 Yeterli geçmiş veri bulunamadı.")
+        return
+
+    # Ortak gün ekseni; her hisse için forward-fill ederek topla
+    all_days = sorted(set().union(*[set(d.keys()) for d in daily]))
+    last = [0] * len(daily)
+    totals = []
+    for day in all_days:
+        s = 0
+        for k, d in enumerate(daily):
+            if day in d:
+                last[k] = d[day]
+            s += last[k]
+        totals.append(s)
+
+    gun = max_span if max_span else len(all_days)
+    peak = max(totals) if totals else 0
+    title = f"Ayni anda acik lot - {gun} gun - {len(wl)} hisse (zirve {peak})"
+    url = build_openlot_chart_url(totals, title)
+
+    caption = (f"📈 *Açık Lot Grafiği*\n"
+               f"_{interval_label(ikey)} · ~{gun} gün · {len(wl)} hisse_\n"
+               f"Aynı anda açık (satılmamış) toplam lot. Zirve: *{peak} lot*.\n"
+               f"_Yüksek değer = aynı anda çok pozisyon = çok sermaye bağlanmış demek._")
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+    await send_photo_to(chat_id, url, caption)
 
 
 async def analyze_watchlist(chat_id, user):
