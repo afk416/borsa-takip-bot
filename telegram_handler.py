@@ -1078,8 +1078,16 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await q.answer("Zaten yok")
                 await refresh_watchlist_message(q, user, edit_mode=True)
             elif action == "analiz":
-                await q.answer("📊 Liste analiz ediliyor...")
-                await analyze_watchlist(chat_id, user)
+                await q.answer()
+                await _send(chat_id, "📊 *Liste Analizi* — hangi grubu analiz edeyim?",
+                            markup=InlineKeyboardMarkup([[
+                                InlineKeyboardButton("📈 BIST", callback_data="wl:an:bist"),
+                                InlineKeyboardButton("🇺🇸 ABD", callback_data="wl:an:us"),
+                                InlineKeyboardButton("🌐 Hepsi", callback_data="wl:an:all"),
+                            ]]))
+            elif action == "an":
+                await q.answer("📊 Analiz ediliyor...")
+                await analyze_watchlist(chat_id, user, parts[2])
 
         # ---- Alarm işlemleri ----
         elif ns == "a":
@@ -1461,11 +1469,20 @@ async def show_openlot_chart(update: Update, user):
     await send_photo_to(chat_id, url, caption)
 
 
-async def analyze_watchlist(chat_id, user):
-    """Listedeki tüm hisseleri tablo halinde analiz eder (hisse·karlı·zararlı·K/Z%)."""
-    wl = user["watchlist"]
+async def analyze_watchlist(chat_id, user, kategori="all"):
+    """Listedeki hisseleri tablo halinde analiz eder. kategori: bist | us | all."""
+    wl_all = user["watchlist"]
+    if kategori == "bist":
+        wl = [s for s in wl_all if s.endswith(".IS")]
+        kat_ad = "BIST"
+    elif kategori == "us":
+        wl = [s for s in wl_all if not s.endswith(".IS")]
+        kat_ad = "ABD"
+    else:
+        wl = wl_all
+        kat_ad = "Hepsi"
     if not wl:
-        await _send(chat_id, "⭐ Listen boş. Önce hisse ekle.")
+        await _send(chat_id, f"⭐ Listende *{kat_ad}* grubunda hisse yok.")
         return
     st = user["settings"]
     ikey = st.get("interval", "gunluk")
@@ -1495,7 +1512,7 @@ async def analyze_watchlist(chat_id, user):
 
     inner = _format_analysis_table(rows, is_cycle, max_span, ikey, with_total=True)
     try:
-        await msg.edit_text("📊 *Liste Analizi*\n```\n" + inner + "\n```",
+        await msg.edit_text(f"📊 *Liste Analizi ({kat_ad})*\n```\n" + inner + "\n```",
                             parse_mode="Markdown")
     except Exception as e:
         log.error(f"Liste analizi mesajı düzenlenemedi: {e}")
