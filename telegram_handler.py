@@ -28,7 +28,6 @@ log = logging.getLogger(__name__)
 
 _app: Application = None
 
-BTN_PRICES    = "📊 Fiyatlar"
 BTN_RSI       = "📈 RSI Tarama"
 BTN_PORTFOLIO = "💼 Portföyüm"
 BTN_WATCHLIST = "⭐ Listem"
@@ -37,7 +36,7 @@ BTN_ADD       = "➕ Hisse Ekle"
 BTN_SETTINGS  = "⚙️ İndikatör Ayarları"
 BTN_HELP      = "❓ Yardım"
 
-MENU_BUTTONS = {BTN_PRICES, BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
+MENU_BUTTONS = {BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
                 BTN_ALERTS, BTN_ADD, BTN_SETTINGS, BTN_HELP}
 
 
@@ -47,10 +46,10 @@ MENU_BUTTONS = {BTN_PRICES, BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
         [
-            [KeyboardButton(BTN_PRICES),    KeyboardButton(BTN_RSI)],
-            [KeyboardButton(BTN_PORTFOLIO), KeyboardButton(BTN_WATCHLIST)],
-            [KeyboardButton(BTN_ALERTS),    KeyboardButton(BTN_ADD)],
-            [KeyboardButton(BTN_SETTINGS),  KeyboardButton(BTN_HELP)],
+            [KeyboardButton(BTN_RSI),       KeyboardButton(BTN_WATCHLIST)],
+            [KeyboardButton(BTN_PORTFOLIO), KeyboardButton(BTN_ALERTS)],
+            [KeyboardButton(BTN_ADD),       KeyboardButton(BTN_SETTINGS)],
+            [KeyboardButton(BTN_HELP)],
         ],
         resize_keyboard=True,
     )
@@ -218,7 +217,6 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/sil SEMBOL — listeden çıkar\n"
         "/fiyat SEMBOL — anlık fiyat + grafik\n\n"
         "*Menü:*\n"
-        f"{BTN_PRICES} — listendeki hisselerin anlık fiyatları\n"
         f"{BTN_RSI} — listendeki hisselerin RSI taraması\n"
         f"{BTN_PORTFOLIO} — elindeki hisseler + kâr/zarar\n"
         f"{BTN_ALERTS} — fiyat ve RSI alarmların\n"
@@ -347,27 +345,6 @@ async def add_to_watchlist(chat_id, user, query: str, reply_to=None):
                 f"{chg_emoji(quote['chg_pct'])} {fmt_pct(quote['chg_pct'])}")
 
 
-async def show_prices(update: Update, user):
-    wl = user["watchlist"]
-    if not wl:
-        await update.message.reply_text(
-            f"Liste boş. {BTN_ADD} ile hisse ekle veya sembol yaz (örn `THYAO`).",
-            parse_mode="Markdown")
-        return
-    msg = await update.message.reply_text("📊 Fiyatlar alınıyor...")
-    lines = ["📊 *Fiyatlar*\n"]
-    for sym in wl:
-        quote = await asyncio.to_thread(yahoo_client.get_quote, sym)
-        if not quote:
-            lines.append(f"▪️ *{base_sym(sym)}* — veri alınamadı")
-            continue
-        lines.append(f"{chg_emoji(quote['chg_pct'])} *{base_sym(sym)}*  "
-                     f"{fmt_price(quote['price'], quote['currency'])}  "
-                     f"({fmt_pct(quote['chg_pct'])})")
-    lines.append("\n_Detay için hisseye sembolüyle bakabilirsin (örn THYAO yaz)._")
-    await msg.edit_text("\n".join(lines), parse_mode="Markdown")
-
-
 async def show_rsi_scan(update: Update, user):
     wl = user["watchlist"]
     if not wl:
@@ -376,8 +353,7 @@ async def show_rsi_scan(update: Update, user):
         return
     st = user["settings"]
     msg = await update.message.reply_text("📈 RSI hesaplanıyor...")
-    lines = [f"📈 *RSI Taraması* — {interval_label(st['interval'])}, "
-             f"RSI({st['rsi_period']})\n"]
+    lines = ["📈 *RSI Taraması*\n"]
     for sym in wl:
         chart = await asyncio.to_thread(yahoo_client.fetch_chart, sym, st["interval"])
         if not chart:
@@ -933,9 +909,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user["pending"] = None   # tanınmayan pending'i temizle
 
     # 2) Ana menü butonları
-    if text == BTN_PRICES:
-        await show_prices(update, user)
-    elif text == BTN_RSI:
+    if text == BTN_RSI:
         await show_rsi_scan(update, user)
     elif text == BTN_PORTFOLIO:
         await show_portfolio(update, user)
