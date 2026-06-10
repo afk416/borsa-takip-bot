@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 logging.getLogger("tvDatafeed").setLevel(logging.CRITICAL)
 
 HISTORY_BARS = 5000   # login'siz üst sınır
-CACHE_TTL = 600       # çekilen veri 10 dk cache'lenir (tekrar çekmeyi önler)
+CACHE_TTL = 3600      # çekilen veri 1 saat cache'lenir (tek+liste analizi tutarlı)
 
 _tv = None
 _lock = threading.Lock()

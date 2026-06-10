@@ -1313,17 +1313,21 @@ def analyze_period_buttons(sym, current_key) -> InlineKeyboardMarkup:
 
 
 async def _fetch_backtest_chart(sym, ikey):
-    """Analiz için OHLCV çeker: önce TradingView (uzun geçmiş), olmazsa Yahoo.
-    tvdatafeed takılırsa 25 sn sonra Yahoo'ya düşer (liste analizi donmasın).
-    Döner (chart, kaynak_adı) — chart None ise veri yok."""
+    """Analiz için OHLCV çeker. TUTARLILIK: tvdatafeed aktifse SADECE onu kullanır
+    (Yahoo'ya düşmez — Yahoo'nun kısa/farklı verisi tek analiz vs liste analizi
+    tutarsızlığı yaratıyordu). tvdatafeed başarısızsa o hisse 'veri yok' olur.
+    tvdatafeed hiç yoksa (import edilemiyorsa) Yahoo'ya geçer.
+    Döner (chart, kaynak_adı)."""
     if tv_client.is_enabled():
         try:
             chart = await asyncio.wait_for(
-                asyncio.to_thread(tv_client.fetch_history, sym, ikey), timeout=25)
+                asyncio.to_thread(tv_client.fetch_history, sym, ikey), timeout=30)
         except (asyncio.TimeoutError, Exception):
             chart = None
         if chart and len(chart["closes"]) >= 40:
             return chart, "TradingView"
+        return None, ""   # tvdatafeed aktif ama başarısız → Yahoo'ya DÜŞME (tutarlılık)
+    # tvdatafeed devre dışı (ör. Render'da çalışmazsa) → Yahoo
     yh_iv, yh_rng, _ = yahoo_client.BACKTEST_RANGE.get(
         ikey, yahoo_client.BACKTEST_RANGE["gunluk"])
     chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, yh_iv, yh_rng)
