@@ -1325,14 +1325,16 @@ async def analyze_watchlist(chat_id, user):
         except Exception:
             pass
 
-    # Renkli liste (kod bloğu YOK → "copy" çıkmaz; renk 🟢/🔴 emoji ile)
-    mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
-    lines = ["📊 *Liste Analizi*",
-             f"_{mod_adi} · {interval_label(ikey)} · 🟢 kâr / 🔴 zarar_\n"]
+    # Hizalı tablo (monospace kod bloğu). Emoji ilk sütun → renk korunur,
+    # KAR/ZAR/K/Z%/LOT sütunları kendi içinde sağa hizalı.
+    WN, WK, WZ, WO, WL = 7, 5, 6, 9, 6
+    head = "  " + (f"{'HİSSE':<{WN}}{'KAR':>{WK}}{'ZARAR':>{WZ}}"
+                   f"{'K/Z%':>{WO}}{'LOT':>{WL}}")
+    tbl = [head]
     tot_w, tot_l, tot_lots, orans = 0, 0, 0, []
     for name, res in rows:
         if res is None:
-            lines.append(f"⚪ *{name}* — veri yok")
+            tbl.append(f"⚪ {name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}{'-':>{WL}}")
             continue
         if is_cycle:
             w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
@@ -1345,21 +1347,21 @@ async def analyze_watchlist(chat_id, user):
         if w + l > 0:
             orans.append(p)
         em = "🟢" if p >= 0 else "🔴"
-        val = fmt_num(p, 1)
-        if p >= 0:
-            val = "+" + val
-        lines.append(f"{em} *{name}* — {w} kâr, {l} zarar — *%{val}* — {lots} lot")
+        oran = ("+" if p >= 0 else "") + fmt_num(p, 1)
+        tbl.append(f"{em} {name:<{WN}}{w:>{WK}}{l:>{WZ}}{oran:>{WO}}{lots:>{WL}}")
 
     avg = (sum(orans) / len(orans)) if orans else 0.0
-    av = fmt_num(avg, 1)
-    if avg >= 0:
-        av = "+" + av
+    avg_s = ("+" if avg >= 0 else "") + fmt_num(avg, 1)
     tem = "🟢" if avg >= 0 else "🔴"
-    lines.append("")
-    lines.append(f"{tem} *TOPLAM* — {tot_w} kâr, {tot_l} zarar — "
-                 f"ort. *%{av}* — {tot_lots} lot")
+    tbl.append("  " + "─" * (WN + WK + WZ + WO + WL))
+    tbl.append(f"{tem} {'TOPLAM':<{WN}}{tot_w:>{WK}}{tot_l:>{WZ}}"
+               f"{avg_s:>{WO}}{tot_lots:>{WL}}")
+
+    mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
+    inner = (f"{mod_adi} · {interval_label(ikey)} · K/Z% ortalama\n\n"
+             + "\n".join(tbl))
     try:
-        await msg.edit_text("\n".join(lines), parse_mode="Markdown")
+        await msg.edit_text("```\n" + inner + "\n```", parse_mode="Markdown")
     except Exception as e:
         log.error(f"Liste analizi mesajı düzenlenemedi: {e}")
 
