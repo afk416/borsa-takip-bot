@@ -31,6 +31,15 @@ INTERVALS = {
     "haftalik": ("1wk", "2y",  "Haftalık"),
 }
 
+# Backtest için: aynı zaman diliminde Yahoo'nun verdiği EN UZUN geçmiş
+# interval_key -> (yahoo interval, yahoo range, görünen dönem etiketi)
+BACKTEST_RANGE = {
+    "15dk":     ("15m", "60d",  "son ~60 gün · 15dk"),
+    "1saat":    ("60m", "730d", "son ~2 yıl · 1 saat"),
+    "gunluk":   ("1d",  "2y",   "son 2 yıl · günlük"),
+    "haftalik": ("1wk", "5y",   "son 5 yıl · haftalık"),
+}
+
 CHART_CACHE_TTL = 120   # saniye
 QUOTE_CACHE_TTL = 60
 

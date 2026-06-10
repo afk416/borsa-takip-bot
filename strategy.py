@@ -213,12 +213,25 @@ def backtest(chart: dict, st: dict) -> dict:
     highs  = chart["highs"]
     lows   = chart["lows"]
     vols   = chart["volumes"]
-    ts     = chart["timestamps"]
     n = len(closes)
 
     period = int(st.get("rsi_period", 21))
-    need = max(period, int(st.get("vol_ma_len", config.VOLUME_MA_LEN)),
-               int(st.get("range_len", config.RANGE_FILTER_LEN))) + 5
+    smooth = int(st.get("rsi_smooth", 1))
+    low    = float(st.get("rsi_low", 25))
+    high   = float(st.get("rsi_high", 78))
+    mode   = st.get("signal_mode", "Crossover")
+    vf  = st.get("vol_filter", True)
+    vml = int(st.get("vol_ma_len", config.VOLUME_MA_LEN))
+    vmu = float(st.get("vol_mult", config.VOLUME_MULTIPLIER))
+    rf  = st.get("range_filter", True)
+    rl  = int(st.get("range_len", config.RANGE_FILTER_LEN))
+    mr  = float(st.get("min_range", config.MIN_RANGE_PCT))
+
+    need = max(period, vml, rl) + 5
+
+    # İndikatörleri TEK kez hesapla (O(n)) — canlı check_signal ile aynı mantık
+    rsis = rsi_series(closes, period)
+    rmas = ema_series(rsis, smooth)
 
     open_lots = []   # açık lotların alış fiyatları
     trades = []      # kapanan her lotun kar/zarar yüzdesi
@@ -226,16 +239,42 @@ def backtest(chart: dict, st: dict) -> dict:
     cycles = 0       # tamamlanan AL→SAT döngüsü sayısı
 
     for i in range(need, n):
-        sub = {"closes": closes[:i + 1], "highs": highs[:i + 1],
-               "lows": lows[:i + 1], "volumes": vols[:i + 1],
-               "timestamps": ts[:i + 1]}
-        sig = check_signal(sub, st)
-        if not sig:
+        rn, rp = rsis[i], rsis[i - 1]
+        mn, mp = rmas[i], rmas[i - 1]
+        if rn is None or rp is None or mn is None or mp is None:
             continue
-        if sig["side"] == "long":
+
+        if mode == "RSI 50 Cross":
+            long_sig  = _crossover(mp, mn, 50, 50)
+            short_sig = _crossunder(mp, mn, 50, 50)
+        elif mode == "RSI EMA Cross":
+            long_sig  = _crossover(rp, rn, mp, mn)
+            short_sig = _crossunder(rp, rn, mp, mn)
+        else:
+            long_sig  = _crossover(mp, mn, low, low)
+            short_sig = _crossunder(mp, mn, high, high)
+        if not (long_sig or short_sig):
+            continue
+
+        # Hacim filtresi (açık mum hariç: i-vml .. i-1) — canlı ile aynı
+        if vf:
+            win = [v for v in vols[i - vml:i] if v is not None]
+            if win:
+                vma = sum(win) / len(win)
+                if vma > 0 and not (vols[i] > vma * vmu):
+                    continue
+
+        # Volatilite filtresi (son rl kapanmış mum) — canlı ile aynı
+        if rf:
+            rngs = [(highs[j] - lows[j]) / closes[j] * 100
+                    for j in range(i - rl, i) if closes[j]]
+            if rngs and (sum(rngs) / len(rngs)) < mr:
+                continue
+
+        if long_sig:
             open_lots.append(closes[i])    # her AL'da +1 lot biriktir
             total_lots += 1
-        elif sig["side"] == "short" and open_lots:
+        elif short_sig and open_lots:
             sat = closes[i]
             for al in open_lots:           # ilk SAT'ta hepsini sat
                 if al > 0:

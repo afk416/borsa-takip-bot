@@ -1220,17 +1220,19 @@ async def analyze_symbol(chat_id, user, sym):
     except Exception:
         return
 
-    chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, "1d", "1y")
-    if not chart or len(chart["closes"]) < 60:
+    st = user["settings"]
+    yh_iv, yh_rng, period_label = yahoo_client.BACKTEST_RANGE.get(
+        st.get("interval", "gunluk"), yahoo_client.BACKTEST_RANGE["gunluk"])
+    chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, yh_iv, yh_rng)
+    if not chart or len(chart["closes"]) < 40:
         await msg.edit_text(f"❌ {base_sym(sym)} için yeterli geçmiş veri yok.")
         return
 
-    st = user["settings"]
     res = await asyncio.to_thread(strategy.backtest, chart, st)
 
-    header = (f"📊 *{base_sym(sym)} — Son 1 Yıl Analizi*\n"
+    header = (f"📊 *{base_sym(sym)} — Geçmiş Analizi*\n"
               f"_Ayar: RSI({st['rsi_period']}) · {st.get('signal_mode', 'Crossover')} · "
-              f"günlük mum_\n\n")
+              f"{period_label} ({res['bars']} mum)_\n\n")
 
     if res["trades"] == 0:
         body = ("Bu ayarlarla son 1 yılda tamamlanmış (AL→SAT) işlem oluşmadı."
@@ -1260,8 +1262,8 @@ async def analyze_symbol(chat_id, user, sym):
                      "satılmadı, dahil değil.)_")
 
     note = ("\n\n_⚠️ Geçmiş performans geleceği garanti etmez. Komisyon/vergi hariç. "
-            "Her lot kendi alış fiyatına göre değerlendirilir. "
-            "1 yıllık 15dk verisi olmadığından analiz günlük mumla yapılır._")
+            "Her lot kendi alış fiyatına göre değerlendirilir. Analiz, sinyal aldığın "
+            "zaman dilimiyle aynı periyotta yapılır._")
     try:
         await msg.edit_text(header + body + note, parse_mode="Markdown")
     except Exception as e:
