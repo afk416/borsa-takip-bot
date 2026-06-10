@@ -237,6 +237,7 @@ def backtest(chart: dict, st: dict) -> dict:
     trades = []        # LOT bazlı: kapanan her lotun kar/zarar yüzdesi
     cycle_trades = []  # İŞLEM bazlı: her AL→SAT döngüsünün NET kar/zarar yüzdesi
     total_lots = 0     # toplam alınan lot (AL sinyali) sayısı
+    total_spent = 0.0  # toplam harcanan = her lotun alış fiyatları toplamı
 
     for i in range(need, n):
         rn, rp = rsis[i], rsis[i - 1]
@@ -274,6 +275,7 @@ def backtest(chart: dict, st: dict) -> dict:
         if long_sig:
             open_lots.append(closes[i])    # her AL'da +1 lot biriktir
             total_lots += 1
+            total_spent += closes[i]       # o lotun alış fiyatı
         elif short_sig and open_lots:
             sat = closes[i]
             valid = [al for al in open_lots if al > 0]
@@ -312,7 +314,8 @@ def backtest(chart: dict, st: dict) -> dict:
         "cycle_best":   max(cycle_trades) if cycle_trades else 0.0,
         "cycle_worst":  min(cycle_trades) if cycle_trades else 0.0,
         # ortak
-        "total_lots": total_lots,      # toplam alınan lot
-        "open_lots":  len(open_lots),  # hâlâ açık (satılmamış) lot
-        "bars":       n,
+        "total_lots":  total_lots,      # toplam alınan lot
+        "total_spent": total_spent,     # harcanan = lot alış fiyatları toplamı
+        "open_lots":   len(open_lots),  # hâlâ açık (satılmamış) lot
+        "bars":        n,
     }

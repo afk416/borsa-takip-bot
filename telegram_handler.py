@@ -1313,11 +1313,14 @@ async def analyze_watchlist(chat_id, user):
         return
 
     rows = []
+    max_span = 0
     for idx, sym in enumerate(wl, 1):
         chart, _src = await _fetch_backtest_chart(sym, ikey)
         if chart is None:
             rows.append((base_sym(sym), None))
         else:
+            span = (chart["timestamps"][-1] - chart["timestamps"][0]) // 86400
+            max_span = max(max_span, span)
             res = await asyncio.to_thread(strategy.backtest, chart, st)
             rows.append((base_sym(sym), res))
         try:
@@ -1327,38 +1330,45 @@ async def analyze_watchlist(chat_id, user):
 
     # Hizalı tablo (monospace kod bloğu). Emoji SON sütunda → tüm sütunlar
     # (başlık dahil) aynı hizada başlar; emoji hizayı bozmaz, renk verir.
-    WN, WK, WZ, WO, WL = 7, 5, 6, 9, 6
+    WN, WK, WZ, WO, WL, WH = 7, 5, 6, 9, 5, 11
     head = (f"{'HİSSE':<{WN}}{'KAR':>{WK}}{'ZARAR':>{WZ}}"
-            f"{'K/Z%':>{WO}}{'LOT':>{WL}}")
+            f"{'K/Z%':>{WO}}{'LOT':>{WL}}{'HARCANAN':>{WH}}")
     tbl = [head]
-    tot_w, tot_l, tot_lots, orans = 0, 0, 0, []
+    tot_w, tot_l, tot_lots, tot_spent, orans = 0, 0, 0, 0.0, []
     for name, res in rows:
         if res is None:
-            tbl.append(f"{name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}{'-':>{WL}}  ⚪")
+            tbl.append(f"{name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}"
+                       f"{'-':>{WL}}{'-':>{WH}}  ⚪")
             continue
         if is_cycle:
             w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
         else:
             w, l, p = res["wins"], res["losses"], res["total_pct"]
         lots = res["total_lots"]
+        spent = res["total_spent"]
         tot_w += w
         tot_l += l
         tot_lots += lots
+        tot_spent += spent
         if w + l > 0:
             orans.append(p)
         em = "🟢" if p >= 0 else "🔴"
         oran = ("+" if p >= 0 else "") + fmt_num(p, 1)
-        tbl.append(f"{name:<{WN}}{w:>{WK}}{l:>{WZ}}{oran:>{WO}}{lots:>{WL}}  {em}")
+        tbl.append(f"{name:<{WN}}{w:>{WK}}{l:>{WZ}}{oran:>{WO}}"
+                   f"{lots:>{WL}}{fmt_num(spent, 0):>{WH}}  {em}")
 
     avg = (sum(orans) / len(orans)) if orans else 0.0
     avg_s = ("+" if avg >= 0 else "") + fmt_num(avg, 1)
     tem = "🟢" if avg >= 0 else "🔴"
-    tbl.append("─" * (WN + WK + WZ + WO + WL))
+    tbl.append("─" * (WN + WK + WZ + WO + WL + WH))
     tbl.append(f"{'TOPLAM':<{WN}}{tot_w:>{WK}}{tot_l:>{WZ}}"
-               f"{avg_s:>{WO}}{tot_lots:>{WL}}  {tem}")
+               f"{avg_s:>{WO}}{tot_lots:>{WL}}{fmt_num(tot_spent, 0):>{WH}}  {tem}")
 
     mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
-    inner = (f"{mod_adi} · {interval_label(ikey)} · K/Z% ortalama\n\n"
+    ay = max_span / 30.0
+    donem = (f"~{max_span} gün (~{ay:.0f} ay)" if max_span else "")
+    inner = (f"{mod_adi} · {interval_label(ikey)} mum · {donem}\n"
+             f"K/Z% ortalama · HARCANAN = lot fiyatları toplamı\n\n"
              + "\n".join(tbl))
     try:
         await msg.edit_text("```\n" + inner + "\n```", parse_mode="Markdown")
