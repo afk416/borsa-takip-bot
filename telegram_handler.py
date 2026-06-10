@@ -34,10 +34,11 @@ BTN_WATCHLIST = "⭐ Listem"
 BTN_ALERTS    = "🔔 Alarmlarım"
 BTN_ADD       = "➕ Hisse Ekle"
 BTN_SETTINGS  = "⚙️ İndikatör Ayarları"
+BTN_SUMMARY   = "🧾 İşlem Özeti"
 BTN_HELP      = "❓ Yardım"
 
 MENU_BUTTONS = {BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
-                BTN_ADD, BTN_SETTINGS, BTN_HELP}
+                BTN_ADD, BTN_SETTINGS, BTN_SUMMARY, BTN_HELP}
 
 
 # ============================================================
@@ -48,7 +49,8 @@ def main_menu_keyboard():
         [
             [KeyboardButton(BTN_RSI),       KeyboardButton(BTN_WATCHLIST)],
             [KeyboardButton(BTN_PORTFOLIO), KeyboardButton(BTN_ADD)],
-            [KeyboardButton(BTN_SETTINGS),  KeyboardButton(BTN_HELP)],
+            [KeyboardButton(BTN_SETTINGS),  KeyboardButton(BTN_SUMMARY)],
+            [KeyboardButton(BTN_HELP)],
         ],
         resize_keyboard=True,
     )
@@ -682,19 +684,29 @@ async def show_portfolio(update: Update, user):
     await msg.edit_text(text, parse_mode="Markdown", reply_markup=markup)
 
 
-def apply_sell(user, sym, pct: int):
-    """Pozisyonun pct%'ini satar. Satılan adedi döner (yoksa None)."""
+def apply_sell(user, sym, pct: int, sell_price=None, currency=""):
+    """Pozisyonun pct%'ini satar. Satılan adedi döner (yoksa None).
+    Gerçekleşen K/Z (kullanıcının maliyetine göre) closed_trades'e kaydedilir."""
     pos = user["portfolio"].get(sym)
     if not pos:
         return None
-    qty = pos["qty"]
+    qty, cost = pos["qty"], pos["cost"]
+    sold = qty if pct >= 100 else qty * pct / 100.0
+
+    if sell_price:   # gerçekleşen işlem kaydı (kullanıcının maliyetiyle)
+        user.setdefault("closed_trades", []).append({
+            "sym":      sym,
+            "qty":      round(sold, 6),
+            "cost":     cost,            # kullanıcının girdiği maliyet
+            "sell":     sell_price,
+            "pnl":      (sell_price - cost) * sold,
+            "currency": currency,
+        })
+
     if pct >= 100:
-        sold = qty
         del user["portfolio"][sym]
     else:
-        sold = qty * pct / 100.0
         pos["qty"] = round(qty - sold, 6)
-    user.get("signal_state", {})  # dokunma; sinyal portföyden bağımsız
     users.save_async()
     return sold
 
@@ -842,6 +854,57 @@ async def show_settings(update: Update, user):
                                     reply_markup=settings_keyboard(user))
 
 
+async def show_trade_summary(update: Update, user):
+    """Kapatılan (satılan) işlemlerin özeti — kullanıcının girdiği maliyetlere göre.
+    Analiz Sayımı ayarına uyar: lot bazlı (her satış) / işlem bazlı (hisse bazında net)."""
+    closed = user.get("closed_trades", [])
+    if not closed:
+        await update.message.reply_text(
+            "🧾 *İşlem Özeti*\n\nHenüz kapatılan işlem yok.\n"
+            "Portföyden bir pozisyonu *Sat* ile kapattığında, gerçekleşen kâr/zararın "
+            "(senin girdiğin maliyete göre) burada özetlenir.",
+            parse_mode="Markdown")
+        return
+
+    is_cycle = user["settings"].get("analysis_mode", "lot") == "islem"
+
+    # Para birimi bazında topla. İşlem bazlı: aynı hissenin satışları 1 işlem (net).
+    by_cur = {}   # currency -> {"used","pnl","win","loss"}
+    if is_cycle:
+        groups = {}   # (currency, sym) -> {"used","pnl"}
+        for t in closed:
+            g = groups.setdefault((t["currency"], t["sym"]), {"used": 0.0, "pnl": 0.0})
+            g["used"] += t["cost"] * t["qty"]
+            g["pnl"]  += t["pnl"]
+        for (cur, _sym), g in groups.items():
+            c = by_cur.setdefault(cur, {"used": 0.0, "pnl": 0.0, "win": 0, "loss": 0})
+            c["used"] += g["used"]
+            c["pnl"]  += g["pnl"]
+            c["win" if g["pnl"] >= 0 else "loss"] += 1
+    else:
+        for t in closed:
+            cur = t["currency"]
+            c = by_cur.setdefault(cur, {"used": 0.0, "pnl": 0.0, "win": 0, "loss": 0})
+            c["used"] += t["cost"] * t["qty"]
+            c["pnl"]  += t["pnl"]
+            c["win" if t["pnl"] >= 0 else "loss"] += 1
+
+    mod = "İşlem bazlı" if is_cycle else "Lot bazlı"
+    lines = ["🧾 *İşlem Özeti* — kapatılan işlemler",
+             f"_Sayım: {mod} · senin girdiğin maliyetlere göre_\n"]
+    for cur, c in by_cur.items():
+        oran = (c["pnl"] / c["used"] * 100) if c["used"] else 0
+        emoji = "🟢" if c["pnl"] >= 0 else "🔴"
+        sign = "+" if c["pnl"] >= 0 else ""
+        lines.append(f"*{cur}*")
+        lines.append(f"💵 Toplam kullanılan: {fmt_num(c['used'])}{cur_suffix(cur)}")
+        lines.append(f"🟢 Karlı işlem: {c['win']}")
+        lines.append(f"🔴 Zararlı işlem: {c['loss']}")
+        lines.append(f"{emoji} Kar/Zarar: {sign}{fmt_num(c['pnl'])}{cur_suffix(cur)} "
+                     f"({fmt_pct(oran)})\n")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 # ============================================================
 # SERBEST METİN
 # ============================================================
@@ -911,6 +974,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_add_menu(update.effective_chat.id)
     elif text == BTN_SETTINGS:
         await show_settings(update, user)
+    elif text == BTN_SUMMARY:
+        await show_trade_summary(update, user)
     elif text == BTN_HELP:
         await cmd_help(update, context)
     else:
@@ -1078,7 +1143,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sym, pct = parts[2], int(parts[3])
                 pos = user["portfolio"].get(sym)
                 quote = await asyncio.to_thread(yahoo_client.get_quote, sym) if pos else None
-                sold = apply_sell(user, sym, pct)
+                sold = apply_sell(user, sym, pct,
+                                  sell_price=(quote["price"] if quote else None),
+                                  currency=(quote["currency"] if quote else ""))
                 if sold is None:
                     await q.answer("Pozisyon yok", show_alert=True)
                 else:

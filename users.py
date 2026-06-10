@@ -70,6 +70,7 @@ def get_or_create(chat_id, name: str = "", username: str = "") -> dict:
             "authorized": not bool(config.ACCESS_CODE),
             "watchlist":  [],
             "portfolio":  {},
+            "closed_trades": [],
             "settings":   copy.deepcopy(config.DEFAULT_SETTINGS),
             "alerts":     [],
             "signal_state": {},
@@ -92,6 +93,7 @@ def get_or_create(chat_id, name: str = "", username: str = "") -> dict:
         u["settings"].setdefault(k, v)   # eski kayıtlara yeni ayar alanlarını ekle
     u.setdefault("alerts", [])
     u.setdefault("signal_state", {})
+    u.setdefault("closed_trades", [])
     u.setdefault("next_alert_id", 1)
     return u
 
