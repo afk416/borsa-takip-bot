@@ -540,6 +540,7 @@ async def show_symbol_card(chat_id, user, quote: dict):
             InlineKeyboardButton("🔔 Alarm Kur", callback_data=f"a:new:{sym}"),
         ],
         [InlineKeyboardButton("💼 Portföye Ekle", callback_data=f"p:add1:{sym}")],
+        [InlineKeyboardButton("📊 Analiz Et (Son 1 Yıl)", callback_data=f"an:{sym}")],
     ]
     markup = InlineKeyboardMarkup(buttons)
 
@@ -983,6 +984,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await q.answer(f"➖ {base_sym(payload)} çıkarıldı", show_alert=False)
                 await _send(chat_id, f"🗑 *{base_sym(payload)}* listenden çıkarıldı.")
 
+        # ---- Analiz (backtest) ----
+        elif ns == "an":
+            sym = parts[1]
+            await q.answer("📊 Analiz başlıyor...")
+            await analyze_symbol(chat_id, user, sym)
+
         # ---- Liste (grid) düzenleme ----
         elif ns == "wl":
             action = parts[1]
@@ -1201,6 +1208,60 @@ async def ask(user, chat_id, text: str, pending: dict, placeholder: str = None):
 async def send_to(chat_id, text: str):
     """Alarm döngüsünün kullandığı bildirim fonksiyonu."""
     await _send(int(chat_id), text)
+
+
+# ============================================================
+# ANALİZ (backtest)
+# ============================================================
+async def analyze_symbol(chat_id, user, sym):
+    """Son 1 yıl backtest: AL→SAT işlemleri, 1 lot için kar/zarar özeti."""
+    try:
+        msg = await _app.bot.send_message(
+            chat_id=chat_id, text="📊 Son 1 yıl analiz ediliyor, bekle...")
+    except Exception:
+        return
+
+    chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, "1d", "1y")
+    if not chart or len(chart["closes"]) < 60:
+        await msg.edit_text(f"❌ {base_sym(sym)} için yeterli geçmiş veri yok.")
+        return
+
+    st = user["settings"]
+    res = await asyncio.to_thread(strategy.backtest, chart, st)
+
+    header = (f"📊 *{base_sym(sym)} — Son 1 Yıl Analizi*\n"
+              f"_Ayar: RSI({st['rsi_period']}) · {st.get('signal_mode', 'Crossover')} · "
+              f"günlük mum_\n\n")
+
+    if res["trades"] == 0:
+        body = ("Bu ayarlarla son 1 yılda tamamlanmış (AL→SAT) işlem oluşmadı."
+                "\n_Eşikleri veya modu değiştirip tekrar deneyebilirsin._")
+        if res["open_pos"]:
+            body += "\n_(Açık bir AL sinyali var ama henüz SAT gelmemiş.)_"
+    else:
+        win_rate = res["wins"] / res["trades"] * 100
+        tsign = "+" if res["total_pct"] >= 0 else ""
+        asign = "+" if res["avg_pct"] >= 0 else ""
+        emoji = "🟢" if res["total_pct"] >= 0 else "🔴"
+        body = (
+            "*1 ADET LOT İÇİN*\n"
+            f"🔄 Toplam Al-Sat: *{res['trades']}*\n"
+            f"🟢 Karlı işlem: *{res['wins']}*\n"
+            f"🔴 Zararlı işlem: *{res['losses']}*\n"
+            f"{emoji} Kar/Zarar: *{tsign}{fmt_num(res['total_pct'], 1)}%*\n\n"
+            f"_Başarı oranı: %{fmt_num(win_rate, 0)} · işlem başına ort. "
+            f"{asign}{fmt_num(res['avg_pct'], 1)}%_\n"
+            f"_En iyi: +{fmt_num(res['best'], 1)}% · en kötü: {fmt_num(res['worst'], 1)}%_"
+        )
+        if res["open_pos"]:
+            body += "\n_(Şu an açık bir pozisyon var — son AL henüz kapanmadı, dahil değil.)_"
+
+    note = ("\n\n_⚠️ Geçmiş performans geleceği garanti etmez. Komisyon/vergi hariç. "
+            "1 yıllık 15dk verisi olmadığından analiz günlük mumla yapılır._")
+    try:
+        await msg.edit_text(header + body + note, parse_mode="Markdown")
+    except Exception as e:
+        log.error(f"Analiz mesajı düzenlenemedi: {e}")
 
 
 # ============================================================

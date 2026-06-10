@@ -65,21 +65,10 @@ def _chart_raw(symbol: str, yh_interval: str, yh_range: str):
     return result[0]
 
 
-def fetch_chart(symbol: str, interval_key: str = "gunluk"):
-    """
-    OHLCV serisi + meta döner (hepsi aynı uzunlukta, hizalı):
-    {"closes", "highs", "lows", "volumes", "timestamps", "meta"}
-    """
-    key = (symbol, interval_key)
-    cached = _chart_cache.get(key)
-    if cached and time.time() - cached[0] < CHART_CACHE_TTL:
-        return cached[1]
-
-    yh_interval, yh_range, _ = INTERVALS.get(interval_key, INTERVALS["gunluk"])
-    res = _chart_raw(symbol, yh_interval, yh_range)
+def _extract(res):
+    """Yahoo chart sonucundan hizalı OHLCV serisi çıkarır."""
     if not res:
         return None
-
     quote = ((res.get("indicators") or {}).get("quote") or [{}])[0]
     closes_raw = quote.get("close") or []
     highs_raw  = quote.get("high") or []
@@ -103,12 +92,31 @@ def fetch_chart(symbol: str, interval_key: str = "gunluk"):
 
     if not closes:
         return None
+    return {"closes": closes, "highs": highs, "lows": lows,
+            "volumes": volumes, "timestamps": timestamps,
+            "meta": res.get("meta") or {}}
 
-    out = {"closes": closes, "highs": highs, "lows": lows,
-           "volumes": volumes, "timestamps": timestamps,
-           "meta": res.get("meta") or {}}
-    _chart_cache[key] = (time.time(), out)
+
+def fetch_chart(symbol: str, interval_key: str = "gunluk"):
+    """
+    OHLCV serisi + meta döner (hepsi aynı uzunlukta, hizalı):
+    {"closes", "highs", "lows", "volumes", "timestamps", "meta"}
+    """
+    key = (symbol, interval_key)
+    cached = _chart_cache.get(key)
+    if cached and time.time() - cached[0] < CHART_CACHE_TTL:
+        return cached[1]
+
+    yh_interval, yh_range, _ = INTERVALS.get(interval_key, INTERVALS["gunluk"])
+    out = _extract(_chart_raw(symbol, yh_interval, yh_range))
+    if out:
+        _chart_cache[key] = (time.time(), out)
     return out
+
+
+def fetch_history(symbol: str, yh_interval: str = "1d", yh_range: str = "1y"):
+    """Backtest için uzun geçmiş (varsayılan 1 yıl günlük). Cache'siz."""
+    return _extract(_chart_raw(symbol, yh_interval, yh_range))
 
 
 def get_quote(symbol: str):

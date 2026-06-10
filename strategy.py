@@ -194,3 +194,56 @@ def check_signal(chart: dict, st: dict) -> dict:
         "mode":      mode,
         "bar_ts":    chart["timestamps"][-1],
     }
+
+
+# ============================================================
+# BACKTEST (geçmiş analiz — long-only)
+# ============================================================
+def backtest(chart: dict, st: dict) -> dict:
+    """
+    Geçmiş veride sinyalleri simüle eder (canlı check_signal mantığıyla birebir):
+    İlk AL sinyalinde 1 lot girilir, SAT sinyalinde çıkılır = 1 işlem.
+    Açık kalan (SAT gelmemiş) pozisyon işlem sayılmaz.
+    Döner: {trades, wins, losses, total_pct, avg_pct, best, worst, open_pos, bars}
+    """
+    closes = chart["closes"]
+    highs  = chart["highs"]
+    lows   = chart["lows"]
+    vols   = chart["volumes"]
+    ts     = chart["timestamps"]
+    n = len(closes)
+
+    period = int(st.get("rsi_period", 21))
+    need = max(period, int(st.get("vol_ma_len", config.VOLUME_MA_LEN)),
+               int(st.get("range_len", config.RANGE_FILTER_LEN))) + 5
+
+    in_pos, entry = False, 0.0
+    trades = []   # her işlemin kar/zarar yüzdesi (1 lot, basit)
+
+    for i in range(need, n):
+        sub = {"closes": closes[:i + 1], "highs": highs[:i + 1],
+               "lows": lows[:i + 1], "volumes": vols[:i + 1],
+               "timestamps": ts[:i + 1]}
+        sig = check_signal(sub, st)
+        if not sig:
+            continue
+        if sig["side"] == "long" and not in_pos:
+            in_pos, entry = True, closes[i]
+        elif sig["side"] == "short" and in_pos and entry > 0:
+            in_pos = False
+            trades.append((closes[i] - entry) / entry * 100.0)
+
+    wins = sum(1 for t in trades if t > 0)
+    losses = len(trades) - wins
+    total = sum(trades)
+    return {
+        "trades":   len(trades),
+        "wins":     wins,
+        "losses":   losses,
+        "total_pct": total,
+        "avg_pct":  (total / len(trades)) if trades else 0.0,
+        "best":     max(trades) if trades else 0.0,
+        "worst":    min(trades) if trades else 0.0,
+        "open_pos": in_pos,
+        "bars":     n,
+    }
