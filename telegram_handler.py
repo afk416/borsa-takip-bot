@@ -33,7 +33,7 @@ BTN_PORTFOLIO = "💼 Portföyüm"
 BTN_WATCHLIST = "⭐ Listem"
 BTN_ALERTS    = "🔔 Alarmlarım"
 BTN_ADD       = "➕ Hisse Ekle"
-BTN_SETTINGS  = "⚙️ Ayarlar"
+BTN_SETTINGS  = "⚙️ İndikatör Ayarları"
 BTN_HELP      = "❓ Yardım"
 
 
@@ -210,10 +210,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*📡 Otomatik AL/SAT Sinyali:*\n"
         f"{BTN_SETTINGS} → *AL/SAT Sinyalini Aç* dersen, listendeki TÜM hisseler "
         "otomatik taranır (alarm kurmana gerek yok):\n"
-        "🟢 *AL* — RSI seçtiğin moda göre yukarı kesişince\n"
-        "🔴 *SAT* — RSI aşağı kesişince (elindekinden çıkış)\n"
-        "Her sinyalde RSI + ATR'a göre önerilen 🛑 Stop / 🎯 Hedef gelir. "
-        "Aynı mum için sinyal bir kez gönderilir.\n\n"
+        "🟢 *AL* — pozisyon yokken RSI yukarı kesişince → girmeyi düşün\n"
+        "🔴 *SAT* — AL'dan sonra RSI aşağı kesişince → *tüm alımları kapat*\n"
+        "_Pozisyon yokken SAT sinyali gelirse bot bir şey yapmaz — asla açığa "
+        "satış (short) önermez. Önce AL, sonra SAT sırası izlenir._\n"
+        "AL sinyalinde RSI + ATR'a göre önerilen 🛑 Stop / 🎯 Hedef gelir.\n\n"
         "*Sinyal modları (Ayarlar'dan seç):*\n"
         "• *Crossover* — RSI, aşırı satım/alım eşiğini keser\n"
         "• *RSI 50 Cross* — RSI 50 çizgisini keser\n"
@@ -378,27 +379,84 @@ async def show_rsi_scan(update: Update, user):
     await msg.edit_text("\n".join(lines), parse_mode="Markdown")
 
 
-async def show_watchlist(update: Update, user):
-    wl = user["watchlist"]
-    if not wl:
-        await update.message.reply_text(
-            f"⭐ Listen boş. {BTN_ADD} ile başla!", parse_mode="Markdown")
-        return
+def _collect_quotes(symbols):
+    """Senkron — birden çok hissenin quote'unu toplar (to_thread ile çağrılır)."""
+    return {s: yahoo_client.get_quote(s) for s in symbols}
+
+
+def _wl_label(sym, quote) -> str:
+    """Grid butonu etiketi: 'THYAO 🔺%1,8' (isim + günlük değişim)."""
+    b = base_sym(sym)
+    if not quote or quote.get("chg_pct") is None:
+        return b
+    pct = quote["chg_pct"]
+    return f"{b}  {chg_emoji(pct)}%{fmt_num(abs(pct), 1)}"
+
+
+def watchlist_markup(wl, quotes, edit_mode: bool) -> InlineKeyboardMarkup:
+    """Hisseleri 2 sütunlu grid olarak dizer (üstte isim + altında % değişim)."""
     rows, row = [], []
     for sym in wl:
-        row.append(InlineKeyboardButton(base_sym(sym), callback_data=f"s:show:{sym}"))
-        if len(row) == 3:
+        label = _wl_label(sym, quotes.get(sym))
+        if edit_mode:
+            row.append(InlineKeyboardButton("❌ " + label, callback_data=f"wl:rm:{sym}"))
+        else:
+            row.append(InlineKeyboardButton(label, callback_data=f"s:show:{sym}"))
+        if len(row) == 2:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
-    await update.message.reply_text(
-        f"⭐ *Takip Listen* ({len(wl)} hisse)\n"
-        "Detay ve işlemler için hisseye dokun:",
-        parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
+    if edit_mode:
+        rows.append([InlineKeyboardButton("✅ Bitti", callback_data="wl:done")])
+    else:
+        rows.append([
+            InlineKeyboardButton("➕ Hisse Ekle", callback_data="wl:add"),
+            InlineKeyboardButton("🗑 Hisse Çıkar", callback_data="wl:edit"),
+        ])
+    return InlineKeyboardMarkup(rows)
 
 
-async def show_add_menu(update: Update, user):
+def watchlist_title(wl, edit_mode: bool) -> str:
+    if edit_mode:
+        return "🗑 *Hisse Çıkar*\nÇıkarmak istediğin hisseye dokun:"
+    return (f"⭐ *Takip Listen* ({len(wl)} hisse)\n"
+            "Detay için hisseye dokun · alttan ekle/çıkar:")
+
+
+async def show_watchlist(update: Update, user):
+    wl = user["watchlist"]
+    if not wl:
+        await update.message.reply_text(
+            f"⭐ Listen boş.\n{BTN_ADD} ile veya sembol yazarak (örn `THYAO`) başla!",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("➕ Hisse Ekle", callback_data="wl:add")]]))
+        return
+    msg = await update.message.reply_text("⭐ Liste yükleniyor...")
+    quotes = await asyncio.to_thread(_collect_quotes, wl)
+    await msg.edit_text(watchlist_title(wl, False), parse_mode="Markdown",
+                        reply_markup=watchlist_markup(wl, quotes, False))
+
+
+async def refresh_watchlist_message(q, user, edit_mode: bool):
+    """Callback'ten gelen grid'i yerinde günceller."""
+    wl = user["watchlist"]
+    if not wl:
+        await q.edit_message_text(
+            "⭐ Listen boş.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("➕ Hisse Ekle", callback_data="wl:add")]]))
+        return
+    quotes = await asyncio.to_thread(_collect_quotes, wl)
+    try:
+        await q.edit_message_text(watchlist_title(wl, edit_mode), parse_mode="Markdown",
+                                  reply_markup=watchlist_markup(wl, quotes, edit_mode))
+    except Exception:
+        pass
+
+
+async def show_add_menu(chat_id):
     rows, row = [], []
     for sym in config.POPULAR_BIST:
         row.append(InlineKeyboardButton(sym, callback_data=f"s:pop:{sym}"))
@@ -407,12 +465,12 @@ async def show_add_menu(update: Update, user):
             row = []
     if row:
         rows.append(row)
-    await update.message.reply_text(
-        "➕ *Hisse Ekle*\n\n"
-        "Popüler BIST hisselerinden seç veya sembolü direkt yaz:\n"
-        "• BIST: `THYAO`, `SISE`, `HEKTS` ...\n"
-        "• ABD: `AAPL`, `NVDA`, `TSLA` ...",
-        parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(rows))
+    await _send(chat_id,
+                "➕ *Hisse Ekle*\n\n"
+                "Popüler BIST hisselerinden seç ya da sembolü direkt yaz:\n"
+                "• BIST: `THYAO`, `SISE`, `HEKTS` ...\n"
+                "• ABD: `AAPL`, `NVDA`, `TSLA` ...",
+                markup=InlineKeyboardMarkup(rows))
 
 
 # ============================================================
@@ -745,7 +803,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif text == BTN_ALERTS:
         await show_alerts(update, user)
     elif text == BTN_ADD:
-        await show_add_menu(update, user)
+        await show_add_menu(update.effective_chat.id)
     elif text == BTN_SETTINGS:
         await show_settings(update, user)
     elif text == BTN_HELP:
@@ -791,6 +849,29 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     users.save_async()
                 await q.answer(f"➖ {base_sym(payload)} çıkarıldı", show_alert=False)
                 await _send(chat_id, f"🗑 *{base_sym(payload)}* listenden çıkarıldı.")
+
+        # ---- Liste (grid) düzenleme ----
+        elif ns == "wl":
+            action = parts[1]
+            if action == "add":
+                await q.answer()
+                await show_add_menu(chat_id)
+            elif action == "edit":
+                await q.answer("🗑 Çıkarma modu")
+                await refresh_watchlist_message(q, user, edit_mode=True)
+            elif action == "done":
+                await q.answer("✅ Tamam")
+                await refresh_watchlist_message(q, user, edit_mode=False)
+            elif action == "rm":
+                sym = parts[2]
+                if sym in user["watchlist"]:
+                    user["watchlist"].remove(sym)
+                    user.get("signal_state", {}).pop(sym, None)
+                    users.save_async()
+                    await q.answer(f"❌ {base_sym(sym)} çıkarıldı")
+                else:
+                    await q.answer("Zaten yok")
+                await refresh_watchlist_message(q, user, edit_mode=True)
 
         # ---- Alarm işlemleri ----
         elif ns == "a":
