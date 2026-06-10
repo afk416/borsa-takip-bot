@@ -1325,30 +1325,48 @@ async def analyze_watchlist(chat_id, user):
         except Exception:
             pass
 
-    # Tablo (monospace)
-    tbl = [f"{'Hisse':<7}{'Kâr':>4}{'Zar':>4}{'K/Z%':>9}"]
+    # Tablo (monospace) — geniş başlıklar + TOPLAM satırı
+    WN, WK, WZ, WO = 8, 6, 7, 12
+    head = f"{'HİSSE':<{WN}}{'KAR':>{WK}}{'ZARAR':>{WZ}}{'K/Z ORANI':>{WO}}"
+    tbl = [head]
+    tot_w, tot_l, orans = 0, 0, []
     for name, res in rows:
         if res is None:
-            tbl.append(f"{name:<7}{'-':>4}{'-':>4}{'-':>9}")
+            tbl.append(f"{name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}")
             continue
         if is_cycle:
             w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
         else:
             w, l, p = res["wins"], res["losses"], res["total_pct"]
+        tot_w += w
+        tot_l += l
+        if w + l > 0:
+            orans.append(p)
         val = fmt_num(p, 1)
         if p >= 0:
             val = "+" + val
-        tbl.append(f"{name:<7}{w:>4}{l:>4}{val:>9}")
+        tbl.append(f"{name:<{WN}}{w:>{WK}}{l:>{WZ}}{val:>{WO}}")
+
+    avg = (sum(orans) / len(orans)) if orans else 0.0
+    avg_s = fmt_num(avg, 1)
+    if avg >= 0:
+        avg_s = "+" + avg_s
+    tbl.append("─" * (WN + WK + WZ + WO))
+    tbl.append(f"{'TOPLAM':<{WN}}{tot_w:>{WK}}{tot_l:>{WZ}}{avg_s:>{WO}}")
 
     mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
-    text = (f"📊 *Liste Analizi*\n"
-            f"_{mod_adi} · {interval_label(ikey)} · geçmiş veriyle backtest_\n"
-            f"```\n" + "\n".join(tbl) + "\n```\n"
-            "_Kâr/Zar = kârlı/zararlı işlem sayısı. Yatırım tavsiyesi değildir._")
+    inner = (f"{mod_adi} · {interval_label(ikey)}\n\n"
+             + "\n".join(tbl)
+             + "\n\n(K/Z ORANI: hisseler ayrı; TOPLAM satırı ortalamadır)")
+    # MarkdownV2 dil etiketi → kod bloğu köşesinde "copy" yerine "Analiz_Sonucu"
     try:
-        await msg.edit_text(text, parse_mode="Markdown")
-    except Exception as e:
-        log.error(f"Liste analizi mesajı düzenlenemedi: {e}")
+        await msg.edit_text("```Analiz_Sonucu\n" + inner + "\n```",
+                            parse_mode="MarkdownV2")
+    except Exception:
+        try:
+            await msg.edit_text(inner)   # düz metin fallback
+        except Exception as e:
+            log.error(f"Liste analizi mesajı düzenlenemedi: {e}")
 
 
 async def analyze_symbol(chat_id, user, sym, interval_key=None, edit_message=None):
