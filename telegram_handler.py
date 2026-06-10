@@ -451,20 +451,29 @@ async def refresh_watchlist_message(q, user, edit_mode: bool):
 
 
 async def show_add_menu(chat_id):
+    rows = [[
+        InlineKeyboardButton("📈 BIST Hisseleri", callback_data="ad:bist"),
+        InlineKeyboardButton("🇺🇸 ABD Hisseleri", callback_data="ad:us"),
+    ]]
+    await _send(chat_id,
+                "➕ *Hisse Ekle*\n\n"
+                "Bir kategori seç (ilk 60 hisse listelenir) ya da sembolü direkt yaz:\n"
+                "• BIST: `THYAO`, `SISE`, `HEKTS` ...\n"
+                "• ABD: `AAPL`, `NVDA`, `TSLA` ...",
+                markup=InlineKeyboardMarkup(rows))
+
+
+def _category_grid(symbols):
+    """Sembolleri 3 sütunlu ekleme grid'i yapar (s:pop:SYM → listeye ekle)."""
     rows, row = [], []
-    for sym in config.POPULAR_BIST:
+    for sym in symbols:
         row.append(InlineKeyboardButton(sym, callback_data=f"s:pop:{sym}"))
         if len(row) == 3:
             rows.append(row)
             row = []
     if row:
         rows.append(row)
-    await _send(chat_id,
-                "➕ *Hisse Ekle*\n\n"
-                "Popüler BIST hisselerinden seç ya da sembolü direkt yaz:\n"
-                "• BIST: `THYAO`, `SISE`, `HEKTS` ...\n"
-                "• ABD: `AAPL`, `NVDA`, `TSLA` ...",
-                markup=InlineKeyboardMarkup(rows))
+    return InlineKeyboardMarkup(rows)
 
 
 # ============================================================
@@ -1022,6 +1031,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     users.save_async()
                 await q.answer(f"➖ {base_sym(payload)} çıkarıldı", show_alert=False)
                 await _send(chat_id, f"🗑 *{base_sym(payload)}* listenden çıkarıldı.")
+
+        # ---- Hisse ekle kategorileri (BIST / ABD) ----
+        elif ns == "ad":
+            cat = parts[1]
+            await q.answer()
+            if cat == "bist":
+                await _send(chat_id, "📈 *BIST Hisseleri* — eklemek için dokun:",
+                            markup=_category_grid(config.BIST_60))
+            else:
+                await _send(chat_id, "🇺🇸 *ABD Hisseleri* — eklemek için dokun:",
+                            markup=_category_grid(config.US_60))
 
         # ---- Analiz (backtest) ----
         elif ns == "an":

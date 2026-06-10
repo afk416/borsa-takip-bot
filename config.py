@@ -62,10 +62,27 @@ SL_ATR_MULT       = 1.5       # önerilen Stop-Loss = fiyat ∓ ATR × bu
 TP_ATR_MULT       = 3.0       # önerilen Take-Profit = fiyat ± ATR × bu
 
 # ============================================================
-# POPÜLER BIST HİSSELERİ (hızlı ekleme menüsü)
+# HIZLI EKLEME LİSTELERİ (Yahoo'da doğrulanmış, ilk ~60 büyük hisse)
 # ============================================================
-POPULAR_BIST = [
-    "THYAO", "ASELS", "GARAN", "AKBNK", "ISCTR", "YKBNK",
-    "BIMAS", "EREGL", "SISE",  "KCHOL", "TUPRS", "SASA",
-    "FROTO", "TCELL", "HEKTS", "PETKM", "ENKAI", "TOASO",
+BIST_60 = [
+    "THYAO", "GARAN", "AKBNK", "ISCTR", "YKBNK", "BIMAS", "EREGL", "SISE",
+    "KCHOL", "TUPRS", "SASA", "FROTO", "TCELL", "HEKTS", "PETKM", "ENKAI",
+    "TOASO", "ASELS", "PGSUS", "MGROS", "TAVHL", "SAHOL", "ARCLK", "EKGYO",
+    "TKFEN", "VESTL", "GUBRF", "KRDMD", "ALARK", "TTKOM", "DOHOL", "SOKM",
+    "ULKER", "AEFES", "CCOLA", "OYAKC", "SMRTG", "BRSAN", "ENJSA", "AKSEN",
+    "CIMSA", "KONTR", "ASTOR", "EUPWR", "ISMEN", "ZOREN", "ECILC", "BERA",
+    "AGHOL", "KARSN", "OTKAR", "TTRAK", "AKSA", "CANTE", "BIOEN", "ALFAS",
+    "HALKB", "VAKBN", "ISGYO", "TSKB",
 ]
+
+US_60 = [
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "JPM",
+    "LLY", "V", "UNH", "XOM", "MA", "JNJ", "PG", "HD", "COST", "ORCL", "ABBV",
+    "MRK", "CVX", "KO", "PEP", "BAC", "ADBE", "NFLX", "AMD", "CRM", "TMO",
+    "WMT", "ACN", "MCD", "CSCO", "ABT", "LIN", "DHR", "INTC", "QCOM", "TXN",
+    "PM", "DIS", "VZ", "INTU", "IBM", "CAT", "GE", "NOW", "AMGN", "NKE",
+    "SPGI", "GS", "ISRG", "BKNG", "UBER", "RTX", "HON", "T", "PFE", "BA",
+]
+
+# Geriye uyumluluk (eski referanslar için)
+POPULAR_BIST = BIST_60[:18]
