@@ -93,8 +93,11 @@ async def alert_loop():
 
         try:
             sigs = await asyncio.to_thread(signals.scan)
-            for chat_id, text in sigs:
-                await telegram_handler.send_to(chat_id, text)
+            for chat_id, text, photo in sigs:
+                if photo:
+                    await telegram_handler.send_photo_to(chat_id, photo, text)
+                else:
+                    await telegram_handler.send_to(chat_id, text)
             if sigs:
                 log.info(f"📡 {len(sigs)} AL/SAT sinyali gönderildi")
         except Exception as e:

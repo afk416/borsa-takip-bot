@@ -19,6 +19,7 @@ import strategy
 import yahoo_client
 from telegram_handler import (
     fmt_price, fmt_pct, fmt_num, chg_emoji, base_sym, interval_label,
+    build_chart_url,
 )
 
 log = logging.getLogger(__name__)
@@ -62,7 +63,7 @@ def _format_signal(sym, sig, quote, interval, is_buy: bool, lots: int) -> str:
 
 
 def scan():
-    """Döner: [(chat_id, mesaj), ...]. signal_state'i (lots/last_ts) günceller."""
+    """Döner: [(chat_id, mesaj, grafik_url|None), ...]. signal_state günceller."""
     results = []
     chart_cache = {}    # (sym, interval) -> chart
     quote_cache = {}    # sym -> quote
@@ -121,9 +122,18 @@ def scan():
             if sym not in quote_cache:
                 quote_cache[sym] = yahoo_client.get_quote(sym)
             shown_lots = lots if is_buy else state.get("lots", 0)
-            results.append((cid,
-                            _format_signal(sym, sig, quote_cache[sym], interval,
-                                           is_buy, shown_lots)))
+            text = _format_signal(sym, sig, quote_cache[sym], interval, is_buy, shown_lots)
+
+            # Grafik: AL sinyalinde yeşil, SAT'ta kırmızı çizgili mini grafik
+            photo = None
+            closes = chart.get("closes") or []
+            if len(closes) >= 2:
+                try:
+                    photo = build_chart_url(
+                        f"{base_sym(sym)} ({interval_label(interval)})", closes, is_buy)
+                except Exception:
+                    photo = None
+            results.append((cid, text, photo))
 
     if dirty:
         users.save_async()

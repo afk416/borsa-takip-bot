@@ -37,7 +37,7 @@ BTN_SETTINGS  = "⚙️ İndikatör Ayarları"
 BTN_HELP      = "❓ Yardım"
 
 MENU_BUTTONS = {BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
-                BTN_ALERTS, BTN_ADD, BTN_SETTINGS, BTN_HELP}
+                BTN_ADD, BTN_SETTINGS, BTN_HELP}
 
 
 # ============================================================
@@ -47,9 +47,8 @@ def main_menu_keyboard():
     return ReplyKeyboardMarkup(
         [
             [KeyboardButton(BTN_RSI),       KeyboardButton(BTN_WATCHLIST)],
-            [KeyboardButton(BTN_PORTFOLIO), KeyboardButton(BTN_ALERTS)],
-            [KeyboardButton(BTN_ADD),       KeyboardButton(BTN_SETTINGS)],
-            [KeyboardButton(BTN_HELP)],
+            [KeyboardButton(BTN_PORTFOLIO), KeyboardButton(BTN_ADD)],
+            [KeyboardButton(BTN_SETTINGS),  KeyboardButton(BTN_HELP)],
         ],
         resize_keyboard=True,
     )
@@ -219,16 +218,12 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*Menü:*\n"
         f"{BTN_RSI} — listendeki hisselerin RSI taraması\n"
         f"{BTN_PORTFOLIO} — elindeki hisseler + kâr/zarar\n"
-        f"{BTN_ALERTS} — fiyat ve RSI alarmların\n"
         f"{BTN_SETTINGS} — RSI periyodu, eşikler, zaman dilimi\n\n"
-        "*Alarmlar:*\n"
-        "📈/📉 Fiyat alarmı: hedef fiyata gelince 1 kez bildirir, kapanır\n"
-        "🟢/🔴 RSI alarmı: aşırı satım/alım bölgesine girince bildirir "
-        "(aynı hisse için en erken 4 saatte bir)\n\n"
         "*📡 Otomatik AL/SAT Sinyali:*\n"
         f"{BTN_SETTINGS} → *AL/SAT Sinyalini Aç* dersen, listendeki TÜM hisseler "
-        "otomatik taranır (alarm kurmana gerek yok):\n"
-        "🟢 *AL* — her sinyalde *+1 lot* topla (üst üste AL gelirse lot birikir)\n"
+        "otomatik taranır:\n"
+        "🟢 *AL* — her sinyalde *+1 lot* topla (üst üste AL gelirse lot birikir), "
+        "grafikle birlikte bildirilir\n"
         "🔴 *SAT* — ilk SAT'ta biriken *tüm lotları* sat, pozisyonu kapat\n"
         "_Pozisyon yokken SAT gelirse bot tepkisiz kalır — asla açığa satış yapmaz._\n"
         "AL sinyalinde RSI + ATR'a göre önerilen 🛑 Stop / 🎯 Hedef gelir.\n\n"
@@ -511,13 +506,10 @@ async def show_symbol_card(chat_id, user, quote: dict):
 
     in_list = sym in user["watchlist"]
     buttons = [
-        [
-            InlineKeyboardButton("➖ Listemden Çıkar" if in_list else "⭐ Listeme Ekle",
-                                 callback_data=f"s:{'rm' if in_list else 'add'}:{sym}"),
-            InlineKeyboardButton("🔔 Alarm Kur", callback_data=f"a:new:{sym}"),
-        ],
+        [InlineKeyboardButton("➖ Listemden Çıkar" if in_list else "⭐ Listeme Ekle",
+                              callback_data=f"s:{'rm' if in_list else 'add'}:{sym}")],
         [InlineKeyboardButton("💼 Portföye Ekle", callback_data=f"p:add1:{sym}")],
-        [InlineKeyboardButton("📊 Analiz Et (Son 1 Yıl)", callback_data=f"an:{sym}")],
+        [InlineKeyboardButton("📊 Analiz Et", callback_data=f"an:{sym}")],
     ]
     markup = InlineKeyboardMarkup(buttons)
 
@@ -915,8 +907,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_portfolio(update, user)
     elif text == BTN_WATCHLIST:
         await show_watchlist(update, user)
-    elif text == BTN_ALERTS:
-        await show_alerts(update, user)
     elif text == BTN_ADD:
         await show_add_menu(update.effective_chat.id)
     elif text == BTN_SETTINGS:
@@ -1198,8 +1188,18 @@ async def ask(user, chat_id, text: str, pending: dict, placeholder: str = None):
 
 
 async def send_to(chat_id, text: str):
-    """Alarm döngüsünün kullandığı bildirim fonksiyonu."""
+    """Düz metin bildirim (sinyal/alarm döngüsü)."""
     await _send(int(chat_id), text)
+
+
+async def send_photo_to(chat_id, photo_url: str, caption: str):
+    """Grafikli bildirim; grafik gönderilemezse düz metne düşer."""
+    try:
+        await _app.bot.send_photo(chat_id=int(chat_id), photo=photo_url,
+                                  caption=caption, parse_mode="Markdown")
+    except Exception as e:
+        log.warning(f"Grafik gönderilemedi ({chat_id}): {e}")
+        await _send(int(chat_id), caption)
 
 
 # ============================================================
