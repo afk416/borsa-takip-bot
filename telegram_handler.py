@@ -36,6 +36,9 @@ BTN_ADD       = "➕ Hisse Ekle"
 BTN_SETTINGS  = "⚙️ İndikatör Ayarları"
 BTN_HELP      = "❓ Yardım"
 
+MENU_BUTTONS = {BTN_PRICES, BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
+                BTN_ALERTS, BTN_ADD, BTN_SETTINGS, BTN_HELP}
+
 
 # ============================================================
 # YARDIMCILAR
@@ -134,9 +137,23 @@ def build_chart_url(title: str, closes, up: bool) -> str:
     return f"https://quickchart.io/chart?w=600&h=300&bkg=white&c={encoded}"
 
 
-async def gate(update: Update):
+async def _cancel_pending(user, chat_id):
+    """Bekleyen akışı iptal eder ve sorulan mesajı (varsa) Telegram'dan siler."""
+    pending = user.get("pending")
+    user["pending"] = None
+    users.save_async()
+    if pending and pending.get("prompt_msg_id"):
+        try:
+            await _app.bot.delete_message(chat_id=chat_id,
+                                          message_id=pending["prompt_msg_id"])
+        except Exception:
+            pass
+
+
+async def gate(update: Update, clear_pending: bool = False):
     """Kullanıcıyı kaydet; erişim kodu gerekiyorsa kontrol et.
-    Yetkili ise user dict, değilse None döner (mesajı kendisi atar)."""
+    Yetkili ise user dict, değilse None döner (mesajı kendisi atar).
+    clear_pending=True: komutlarda bekleyen akışı iptal eder (kullanıcı takılmasın)."""
     chat = update.effective_chat
     tg_user = update.effective_user
     user = users.get_or_create(
@@ -145,6 +162,8 @@ async def gate(update: Update):
         username=(tg_user.username if tg_user else ""),
     )
     if user["authorized"]:
+        if clear_pending and user.get("pending"):
+            await _cancel_pending(user, chat.id)
         return user
 
     text = (update.message.text or "").strip() if update.message else ""
@@ -169,7 +188,7 @@ async def gate(update: Update):
 # KOMUTLAR
 # ============================================================
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = await gate(update)
+    user = await gate(update, clear_pending=True)
     if not user:
         return
     await update.message.reply_text(
@@ -186,7 +205,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = await gate(update)
+    user = await gate(update, clear_pending=True)
     if not user:
         return
     await update.message.reply_text(
@@ -229,7 +248,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = await gate(update)
+    user = await gate(update, clear_pending=True)
     if not user:
         return
     if not context.args:
@@ -239,7 +258,7 @@ async def cmd_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = await gate(update)
+    user = await gate(update, clear_pending=True)
     if not user:
         return
     if not context.args:
@@ -257,7 +276,7 @@ async def cmd_remove(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_price(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = await gate(update)
+    user = await gate(update, clear_pending=True)
     if not user:
         return
     if not context.args:
@@ -858,8 +877,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    # 1) Bekleyen çok adımlı akış var mı?
+    # Menü butonuna/komuta basıldıysa bekleyen akışı iptal et (kullanıcı takılmasın)
     pending = user.get("pending")
+    if pending and (text.startswith("/") or text in MENU_BUTTONS):
+        await _cancel_pending(user, update.effective_chat.id)
+        pending = None
+
+    # 1) Bekleyen çok adımlı akış var mı?
     if pending:
         action = pending.get("a")
         if action == "alarm_val":
@@ -992,10 +1016,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             markup=alert_type_menu(sym))
             elif action == "ask":
                 await q.answer()
-                user["pending"] = {"a": "alarm_sym"}
-                users.save_async()
-                await _send(chat_id,
-                            "Hangi hisse için alarm kuralım? Sembolü yaz (örn `THYAO`):")
+                await ask(user, chat_id,
+                          "Hangi hisse için alarm kuralım? Sembolü yaz (örn `THYAO`):",
+                          {"a": "alarm_sym"}, placeholder="THYAO")
             elif action == "t":
                 t, sym = parts[2], parts[3]
                 active = [a for a in user["alerts"] if a.get("active")]
@@ -1005,15 +1028,14 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     return
                 if t in ("pa", "pb"):
                     await q.answer()
-                    user["pending"] = {"a": "alarm_val", "t": t, "sym": sym}
-                    users.save_async()
                     direction = "üstüne çıkınca" if t == "pa" else "altına inince"
                     quote = await asyncio.to_thread(yahoo_client.get_quote, sym)
                     now_line = (f"\nŞu anki fiyat: *{fmt_price(quote['price'], quote['currency'])}*"
                                 if quote else "")
-                    await _send(chat_id,
-                                f"📍 *{base_sym(sym)}* fiyatı hangi değerin {direction} "
-                                f"haber vereyim?{now_line}\n\nHedef fiyatı yaz (örn `250,75`):")
+                    await ask(user, chat_id,
+                              f"📍 *{base_sym(sym)}* fiyatı hangi değerin {direction} "
+                              f"haber vereyim?{now_line}\n\nHedef fiyatı yaz (örn `250,75`):",
+                              {"a": "alarm_val", "t": t, "sym": sym}, placeholder="250,75")
                 else:
                     atype = "rsi_low" if t == "rl" else "rsi_high"
                     al = users.add_alert(user, sym, atype)
@@ -1086,25 +1108,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     await q.edit_message_text(text, parse_mode="Markdown", reply_markup=markup)
             elif action == "new":     # yeni pozisyon (sembollü)
                 await q.answer()
-                user["pending"] = {"a": "port_new"}
-                users.save_async()
-                await _app.bot.send_message(
-                    chat_id=chat_id,
-                    text="💼 Yeni pozisyon — şu formatta yaz:\n`SEMBOL ADET MALİYET`\n"
-                         "Örnek: `THYAO 10 230,50`",
-                    parse_mode="Markdown",
-                    reply_markup=ForceReply(input_field_placeholder="THYAO 10 230,50"))
+                await ask(user, chat_id,
+                          "💼 Yeni pozisyon — şu formatta yaz:\n`SEMBOL ADET MALİYET`\n"
+                          "Örnek: `THYAO 10 230,50`",
+                          {"a": "port_new"}, placeholder="THYAO 10 230,50")
             elif action == "add1":    # belli hisseye ekle
                 sym = parts[2]
                 await q.answer()
-                user["pending"] = {"a": "port_one", "sym": sym}
-                users.save_async()
-                await _app.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"➕ *{base_sym(sym)}* — eklenecek adet ve maliyeti yaz:\n"
-                         f"`ADET MALİYET`\nÖrnek: `10 230,50`",
-                    parse_mode="Markdown",
-                    reply_markup=ForceReply(input_field_placeholder="10 230,50"))
+                await ask(user, chat_id,
+                          f"➕ *{base_sym(sym)}* — eklenecek adet ve maliyeti yaz:\n"
+                          f"`ADET MALİYET`\nÖrnek: `10 230,50`",
+                          {"a": "port_one", "sym": sym}, placeholder="10 230,50")
 
         # ---- Ayarlar ----
         elif ns == "c":
@@ -1168,6 +1182,20 @@ async def _send(chat_id, text: str, markup=None):
                                     parse_mode="Markdown", reply_markup=markup)
     except Exception as e:
         log.error(f"Mesaj gönderilemedi ({chat_id}): {e}")
+
+
+async def ask(user, chat_id, text: str, pending: dict, placeholder: str = None):
+    """Soru sorar (ForceReply ile klavye açılır), bekleyen akışı kaydeder.
+    Sorulan mesajın id'si pending'e yazılır → kullanıcı başka komuta geçerse silinir."""
+    markup = ForceReply(input_field_placeholder=placeholder) if placeholder else None
+    try:
+        m = await _app.bot.send_message(chat_id=chat_id, text=text,
+                                        parse_mode="Markdown", reply_markup=markup)
+        pending["prompt_msg_id"] = m.message_id
+    except Exception as e:
+        log.error(f"Soru gönderilemedi ({chat_id}): {e}")
+    user["pending"] = pending
+    users.save_async()
 
 
 async def send_to(chat_id, text: str):
