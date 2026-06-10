@@ -210,10 +210,17 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "*📡 Otomatik AL/SAT Sinyali:*\n"
         f"{BTN_SETTINGS} → *AL/SAT Sinyalini Aç* dersen, listendeki TÜM hisseler "
         "otomatik taranır (alarm kurmana gerek yok):\n"
-        "🟢 *AL* — RSI aşırı satımdan yukarı dönünce\n"
-        "🔴 *SAT* — RSI aşırı alımdan aşağı dönünce\n"
-        "Sinyal sadece dönüş anında bir kez gelir. İşlemi Midas'tan elle yaparsın "
-        "(bot otomatik alım-satım YAPMAZ).\n\n"
+        "🟢 *AL* — RSI seçtiğin moda göre yukarı kesişince\n"
+        "🔴 *SAT* — RSI aşağı kesişince (elindekinden çıkış)\n"
+        "Her sinyalde RSI + ATR'a göre önerilen 🛑 Stop / 🎯 Hedef gelir. "
+        "Aynı mum için sinyal bir kez gönderilir.\n\n"
+        "*Sinyal modları (Ayarlar'dan seç):*\n"
+        "• *Crossover* — RSI, aşırı satım/alım eşiğini keser\n"
+        "• *RSI 50 Cross* — RSI 50 çizgisini keser\n"
+        "• *RSI EMA Cross* — RSI kendi EMA'sını keser\n"
+        "*Filtreler:* Hacim (düşük hacimli sinyali eler) ve Volatilite "
+        "(yatay/durgun hisseyi eler) — Ayarlar'dan açıp kapatabilirsin.\n"
+        "İşlemi Midas'tan elle yaparsın (bot otomatik alım-satım YAPMAZ).\n\n"
         "_Bu bot herkese açık — arkadaşların da kendi Telegram'ından "
         "/start diyerek kendi listesini kurabilir._",
         parse_mode="Markdown", reply_markup=main_menu_keyboard(),
@@ -616,14 +623,19 @@ def settings_text(user) -> str:
     return (
         "⚙️ *Ayarların*\n\n"
         f"RSI Periyot: *{st['rsi_period']}*\n"
+        f"RSI Smooth (EMA): *{st.get('rsi_smooth', 1)}*\n"
         f"Aşırı Satım eşiği: *{st['rsi_low']}*\n"
         f"Aşırı Alım eşiği: *{st['rsi_high']}*\n"
         f"Zaman Dilimi: *{interval_label(st['interval'])}*\n"
+        f"Sinyal Modu: *{st.get('signal_mode', 'Crossover')}*\n"
+        f"Hacim Filtresi: *{'Açık ✅' if st.get('vol_filter') else 'Kapalı'}*\n"
+        f"Volatilite Filtresi: *{'Açık ✅' if st.get('range_filter') else 'Kapalı'}*\n"
         f"Bildirimler: *{'Açık 🔔' if st['notif'] else 'Kapalı 🔕'}*\n"
         f"Otomatik AL/SAT Sinyali: *{'Açık 📡' if st.get('signals') else 'Kapalı'}*\n\n"
         "_RSI eşikleri hem taramada hem alarmlarda hem de AL/SAT sinyalinde kullanılır._\n"
-        "_AL/SAT sinyali açıkken listendeki hisseler otomatik taranır; RSI aşırı "
-        "satımdan dönünce AL, aşırı alımdan dönünce SAT bildirimi gelir._"
+        "_AL/SAT sinyali açıkken listendeki hisseler otomatik taranır; seçtiğin moda "
+        "göre crossover olunca, hacim ve volatilite filtrelerinden geçen sinyaller "
+        "(ATR'a göre Stop/Hedef'le birlikte) bildirilir._"
     )
 
 
@@ -637,10 +649,20 @@ def settings_keyboard(user) -> InlineKeyboardMarkup:
 
     rows = [
         opt_row("rp", [7, 14, 21], st["rsi_period"]),
+        opt_row("rs", [1, 3, 5], st.get("rsi_smooth", 1)),
         opt_row("rl", [20, 25, 30, 35], st["rsi_low"]),
         opt_row("rh", [65, 70, 75, 80], st["rsi_high"]),
         opt_row("int", list(yahoo_client.INTERVALS.keys()), st["interval"],
                 fmt=interval_label),
+        [InlineKeyboardButton(("✅ " if m == st.get("signal_mode", "Crossover") else "") + m,
+                              callback_data=f"c:mode:{i}")
+         for i, m in enumerate(config.SIGNAL_MODES)],
+        [InlineKeyboardButton(
+            "📊 Hacim Filtresi: " + ("Açık ✅" if st.get("vol_filter") else "Kapalı"),
+            callback_data="c:volf:x")],
+        [InlineKeyboardButton(
+            "📈 Volatilite Filtresi: " + ("Açık ✅" if st.get("range_filter") else "Kapalı"),
+            callback_data="c:rangef:x")],
         [InlineKeyboardButton(
             "🔕 Bildirimleri Kapat" if st["notif"] else "🔔 Bildirimleri Aç",
             callback_data="c:notif:x")],
@@ -649,9 +671,10 @@ def settings_keyboard(user) -> InlineKeyboardMarkup:
             callback_data="c:signals:x")],
     ]
     # satır başlıkları
-    rows[0].insert(0, InlineKeyboardButton("RSI:", callback_data="c:noop:x"))
-    rows[1].insert(0, InlineKeyboardButton("Alt:", callback_data="c:noop:x"))
-    rows[2].insert(0, InlineKeyboardButton("Üst:", callback_data="c:noop:x"))
+    rows[0].insert(0, InlineKeyboardButton("RSI:",    callback_data="c:noop:x"))
+    rows[1].insert(0, InlineKeyboardButton("Smooth:", callback_data="c:noop:x"))
+    rows[2].insert(0, InlineKeyboardButton("Alt:",    callback_data="c:noop:x"))
+    rows[3].insert(0, InlineKeyboardButton("Üst:",    callback_data="c:noop:x"))
     return InlineKeyboardMarkup(rows)
 
 
@@ -867,12 +890,20 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             if key == "rp":
                 st["rsi_period"] = int(parts[2])
+            elif key == "rs":
+                st["rsi_smooth"] = int(parts[2])
             elif key == "rl":
                 st["rsi_low"] = int(parts[2])
             elif key == "rh":
                 st["rsi_high"] = int(parts[2])
             elif key == "int":
                 st["interval"] = parts[2]
+            elif key == "mode":
+                st["signal_mode"] = config.SIGNAL_MODES[int(parts[2])]
+            elif key == "volf":
+                st["vol_filter"] = not st.get("vol_filter", True)
+            elif key == "rangef":
+                st["range_filter"] = not st.get("range_filter", True)
             elif key == "notif":
                 st["notif"] = not st["notif"]
             elif key == "signals":

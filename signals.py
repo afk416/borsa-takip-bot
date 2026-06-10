@@ -1,15 +1,16 @@
 """
-Otomatik AL/SAT sinyal motoru (eski OKX botundaki Crossover mantığı).
+Otomatik AL/SAT sinyal motoru.
 - Sinyal modu açık kullanıcıların TÜM watchlist'i taranır (alarm kurmaya gerek yok)
-- Her hisse için son RSI bölgesi (low/mid/high) kullanıcı kaydında tutulur
-- Sinyal yalnızca BÖLGE GEÇİŞİNDE üretilir (sürekli tekrar etmez):
-    AL  : RSI aşırı satımdan (low) yukarı, eşiğin üstüne döndüğünde → toparlanma
-    SAT : RSI aşırı alımdan (high) aşağı, eşiğin altına döndüğünde → zayıflama
-- İlk taramada baseline kurulur, sinyal üretilmez (yanlış ilk sinyali önler)
+- strategy.check_signal eski OKX botunun crossover + filtre mantığını uygular
+- Aynı bar için aynı sinyal iki kez gönderilmez: signal_state[sym] = {"ts","side"}
 - Senkron çalışır; main.py asyncio.to_thread ile çağırır
+
+Not: BIST'te açığa satış bireysel olarak pratikte yapılamaz; "SAT sinyali"
+elindeki pozisyondan çıkış / kâr al anlamındadır, açığa satış değil.
 """
 import logging
 
+import config
 import users
 import strategy
 import yahoo_client
@@ -20,18 +21,43 @@ from telegram_handler import (
 log = logging.getLogger(__name__)
 
 
-def _zone(rsi_val: float, low: int, high: int) -> str:
-    if rsi_val <= low:
-        return "low"
-    if rsi_val >= high:
-        return "high"
-    return "mid"
+def _format_signal(sym, sig, quote, interval) -> str:
+    is_long = sig["side"] == "long"
+    title = "🟢 *AL Sinyali*" if is_long else "🔴 *SAT Sinyali*"
+
+    price_line = ""
+    if quote:
+        price_line = (f"\n💰 {fmt_price(quote['price'], quote['currency'])} "
+                      f"{chg_emoji(quote['chg_pct'])} {fmt_pct(quote['chg_pct'])}")
+
+    cur = quote["currency"] if quote else ""
+    sltp = ""
+    if sig.get("sl") and sig.get("tp"):
+        sltp = (f"\n🛑 Stop: {fmt_price(sig['sl'], cur)}   "
+                f"🎯 Hedef: {fmt_price(sig['tp'], cur)}")
+
+    extras = []
+    if sig.get("vol_ratio"):
+        extras.append(f"Hacim ×{fmt_num(sig['vol_ratio'])}")
+    if sig.get("range_pct"):
+        extras.append(f"Volatilite %{fmt_num(sig['range_pct'])}")
+    extra_line = f"\n📊 {' · '.join(extras)}" if extras else ""
+
+    return (
+        f"{title} — *{base_sym(sym)}*\n"
+        f"Mod: {sig['mode']} · RSI({interval_label(interval)}): *{fmt_num(sig['rsi'], 1)}*"
+        f"{price_line}"
+        f"{sltp}"
+        f"{extra_line}\n\n"
+        f"_Otomatik sinyal — işlemi Midas'tan elle yapmalısın. "
+        f"Stop/Hedef ATR'a göre önerilir. Yatırım tavsiyesi değildir._"
+    )
 
 
 def scan():
     """Döner: [(chat_id, mesaj), ...]. signal_state'i günceller."""
     results = []
-    rsi_cache = {}      # (sym, interval, period) -> rsi
+    chart_cache = {}    # (sym, interval) -> chart
     quote_cache = {}    # sym -> quote
     dirty = False
 
@@ -44,50 +70,32 @@ def scan():
             continue
 
         sig_state = u.setdefault("signal_state", {})
-        low, high = st.get("rsi_low", 30), st.get("rsi_high", 70)
-        period, interval = st.get("rsi_period", 14), st.get("interval", "gunluk")
+        interval = st.get("interval", "gunluk")
 
         for sym in wl:
-            key = (sym, interval, period)
-            if key not in rsi_cache:
-                chart = yahoo_client.fetch_chart(sym, interval)
-                rsi_cache[key] = (strategy.rsi(chart["closes"], period)
-                                  if chart else None)
-            r = rsi_cache[key]
-            if r is None:
+            ckey = (sym, interval)
+            if ckey not in chart_cache:
+                chart_cache[ckey] = yahoo_client.fetch_chart(sym, interval)
+            chart = chart_cache[ckey]
+            if not chart:
                 continue
 
-            new_zone = _zone(r, low, high)
-            prev_zone = sig_state.get(sym)
-            sig_state[sym] = new_zone
+            sig = strategy.check_signal(chart, st)
+            if not sig:
+                continue
+
+            # Aynı barın aynı yönlü sinyalini tekrar gönderme (spam önleme)
+            last = sig_state.get(sym)
+            if not isinstance(last, dict):
+                last = None
+            if last and last.get("ts") == sig["bar_ts"] and last.get("side") == sig["side"]:
+                continue
+            sig_state[sym] = {"ts": sig["bar_ts"], "side": sig["side"]}
             dirty = True
-
-            if prev_zone is None or prev_zone == new_zone:
-                continue   # baseline veya bölge değişmedi → sinyal yok
-
-            signal = None
-            if prev_zone == "low" and new_zone == "mid":
-                signal = ("🟢 *AL Sinyali*", "aşırı satımdan yukarı döndü")
-            elif prev_zone == "high" and new_zone == "mid":
-                signal = ("🔴 *SAT Sinyali*", "aşırı alımdan aşağı döndü")
-            if not signal:
-                continue
 
             if sym not in quote_cache:
                 quote_cache[sym] = yahoo_client.get_quote(sym)
-            quote = quote_cache[sym]
-            price_line = ""
-            if quote:
-                price_line = (f"\n💰 {fmt_price(quote['price'], quote['currency'])} "
-                              f"{chg_emoji(quote['chg_pct'])} {fmt_pct(quote['chg_pct'])}")
-
-            title, reason = signal
-            results.append((cid,
-                f"{title} — *{base_sym(sym)}*\n"
-                f"RSI({period}, {interval_label(interval)}): *{fmt_num(r, 1)}* ({reason})"
-                f"{price_line}\n\n"
-                f"_Otomatik sinyal — işlemi Midas'tan elle yapmalısın. "
-                f"Yatırım tavsiyesi değildir._"))
+            results.append((cid, _format_signal(sym, sig, quote_cache[sym], interval)))
 
     if dirty:
         users.save_async()

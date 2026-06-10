@@ -31,13 +31,29 @@ MAX_ALERTS    = 20
 # YENİ KULLANICI DEFAULTLARI
 # ============================================================
 DEFAULT_SETTINGS = {
-    "rsi_period": 14,
-    "rsi_low":    30,
-    "rsi_high":   70,
-    "interval":   "gunluk",   # yahoo_client.INTERVALS anahtarı
-    "notif":      True,
-    "signals":    False,      # otomatik AL/SAT sinyal modu (watchlist taraması)
+    "rsi_period":  14,
+    "rsi_smooth":  1,         # RSI'a EMA yumuşatma (1 = ham RSI)
+    "rsi_low":     30,
+    "rsi_high":    70,
+    "interval":    "gunluk",  # yahoo_client.INTERVALS anahtarı
+    "signal_mode": "Crossover",  # config.SIGNAL_MODES
+    "vol_filter":   True,     # hacim filtresi
+    "range_filter": True,     # volatilite (range) filtresi
+    "notif":       True,
+    "signals":     False,     # otomatik AL/SAT sinyal modu (watchlist taraması)
 }
+
+# ============================================================
+# SİNYAL STRATEJİSİ SABİTLERİ (bot geneli)
+# ============================================================
+SIGNAL_MODES      = ["Crossover", "RSI 50 Cross", "RSI EMA Cross"]
+VOLUME_MA_LEN     = 20        # hacim ortalaması periyodu
+VOLUME_MULTIPLIER = 1.0       # anlık hacim, MA × bu değerin üstünde olmalı
+RANGE_FILTER_LEN  = 20        # volatilite için bakılacak mum sayısı
+MIN_RANGE_PCT     = 0.3       # son N mum ort. (high-low)/close %; altı "düz" sayılır
+ATR_LENGTH        = 14
+SL_ATR_MULT       = 1.5       # önerilen Stop-Loss = fiyat ∓ ATR × bu
+TP_ATR_MULT       = 3.0       # önerilen Take-Profit = fiyat ± ATR × bu
 
 # ============================================================
 # POPÜLER BIST HİSSELERİ (hızlı ekleme menüsü)

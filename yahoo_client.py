@@ -67,8 +67,8 @@ def _chart_raw(symbol: str, yh_interval: str, yh_range: str):
 
 def fetch_chart(symbol: str, interval_key: str = "gunluk"):
     """
-    Kapanış serisi + meta döner:
-    {"closes": [...], "timestamps": [...], "meta": {...}}
+    OHLCV serisi + meta döner (hepsi aynı uzunlukta, hizalı):
+    {"closes", "highs", "lows", "volumes", "timestamps", "meta"}
     """
     key = (symbol, interval_key)
     cached = _chart_cache.get(key)
@@ -82,18 +82,31 @@ def fetch_chart(symbol: str, interval_key: str = "gunluk"):
 
     quote = ((res.get("indicators") or {}).get("quote") or [{}])[0]
     closes_raw = quote.get("close") or []
+    highs_raw  = quote.get("high") or []
+    lows_raw   = quote.get("low") or []
+    vols_raw   = quote.get("volume") or []
     timestamps_raw = res.get("timestamp") or []
 
-    closes, timestamps = [], []
-    for ts, c in zip(timestamps_raw, closes_raw):
-        if c is not None:
-            closes.append(float(c))
-            timestamps.append(ts)
+    closes, highs, lows, volumes, timestamps = [], [], [], [], []
+    for i, ts in enumerate(timestamps_raw):
+        c = closes_raw[i] if i < len(closes_raw) else None
+        if c is None:
+            continue   # boş mumu atla (hizayı korur)
+        closes.append(float(c))
+        timestamps.append(ts)
+        h = highs_raw[i] if i < len(highs_raw) else None
+        l = lows_raw[i] if i < len(lows_raw) else None
+        v = vols_raw[i] if i < len(vols_raw) else None
+        highs.append(float(h) if h is not None else float(c))
+        lows.append(float(l) if l is not None else float(c))
+        volumes.append(float(v) if v is not None else 0.0)
 
     if not closes:
         return None
 
-    out = {"closes": closes, "timestamps": timestamps, "meta": res.get("meta") or {}}
+    out = {"closes": closes, "highs": highs, "lows": lows,
+           "volumes": volumes, "timestamps": timestamps,
+           "meta": res.get("meta") or {}}
     _chart_cache[key] = (time.time(), out)
     return out
 
