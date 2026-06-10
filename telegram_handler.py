@@ -1325,16 +1325,16 @@ async def analyze_watchlist(chat_id, user):
         except Exception:
             pass
 
-    # Hizalı tablo (monospace kod bloğu). Emoji ilk sütun → renk korunur,
-    # KAR/ZAR/K/Z%/LOT sütunları kendi içinde sağa hizalı.
+    # Hizalı tablo (monospace kod bloğu). Emoji SON sütunda → tüm sütunlar
+    # (başlık dahil) aynı hizada başlar; emoji hizayı bozmaz, renk verir.
     WN, WK, WZ, WO, WL = 7, 5, 6, 9, 6
-    head = "  " + (f"{'HİSSE':<{WN}}{'KAR':>{WK}}{'ZARAR':>{WZ}}"
-                   f"{'K/Z%':>{WO}}{'LOT':>{WL}}")
+    head = (f"{'HİSSE':<{WN}}{'KAR':>{WK}}{'ZARAR':>{WZ}}"
+            f"{'K/Z%':>{WO}}{'LOT':>{WL}}")
     tbl = [head]
     tot_w, tot_l, tot_lots, orans = 0, 0, 0, []
     for name, res in rows:
         if res is None:
-            tbl.append(f"⚪ {name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}{'-':>{WL}}")
+            tbl.append(f"{name:<{WN}}{'-':>{WK}}{'-':>{WZ}}{'-':>{WO}}{'-':>{WL}}  ⚪")
             continue
         if is_cycle:
             w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
@@ -1348,14 +1348,14 @@ async def analyze_watchlist(chat_id, user):
             orans.append(p)
         em = "🟢" if p >= 0 else "🔴"
         oran = ("+" if p >= 0 else "") + fmt_num(p, 1)
-        tbl.append(f"{em} {name:<{WN}}{w:>{WK}}{l:>{WZ}}{oran:>{WO}}{lots:>{WL}}")
+        tbl.append(f"{name:<{WN}}{w:>{WK}}{l:>{WZ}}{oran:>{WO}}{lots:>{WL}}  {em}")
 
     avg = (sum(orans) / len(orans)) if orans else 0.0
     avg_s = ("+" if avg >= 0 else "") + fmt_num(avg, 1)
     tem = "🟢" if avg >= 0 else "🔴"
-    tbl.append("  " + "─" * (WN + WK + WZ + WO + WL))
-    tbl.append(f"{tem} {'TOPLAM':<{WN}}{tot_w:>{WK}}{tot_l:>{WZ}}"
-               f"{avg_s:>{WO}}{tot_lots:>{WL}}")
+    tbl.append("─" * (WN + WK + WZ + WO + WL))
+    tbl.append(f"{'TOPLAM':<{WN}}{tot_w:>{WK}}{tot_l:>{WZ}}"
+               f"{avg_s:>{WO}}{tot_lots:>{WL}}  {tem}")
 
     mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
     inner = (f"{mod_adi} · {interval_label(ikey)} · K/Z% ortalama\n\n"
