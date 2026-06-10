@@ -1329,7 +1329,7 @@ async def analyze_watchlist(chat_id, user):
     mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
     lines = ["📊 *Liste Analizi*",
              f"_{mod_adi} · {interval_label(ikey)} · 🟢 kâr / 🔴 zarar_\n"]
-    tot_w, tot_l, orans = 0, 0, []
+    tot_w, tot_l, tot_lots, orans = 0, 0, 0, []
     for name, res in rows:
         if res is None:
             lines.append(f"⚪ *{name}* — veri yok")
@@ -1338,15 +1338,17 @@ async def analyze_watchlist(chat_id, user):
             w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
         else:
             w, l, p = res["wins"], res["losses"], res["total_pct"]
+        lots = res["total_lots"]
         tot_w += w
         tot_l += l
+        tot_lots += lots
         if w + l > 0:
             orans.append(p)
         em = "🟢" if p >= 0 else "🔴"
         val = fmt_num(p, 1)
         if p >= 0:
             val = "+" + val
-        lines.append(f"{em} *{name}* — {w} kâr, {l} zarar — *%{val}*")
+        lines.append(f"{em} *{name}* — {w} kâr, {l} zarar — *%{val}* — {lots} lot")
 
     avg = (sum(orans) / len(orans)) if orans else 0.0
     av = fmt_num(avg, 1)
@@ -1354,7 +1356,8 @@ async def analyze_watchlist(chat_id, user):
         av = "+" + av
     tem = "🟢" if avg >= 0 else "🔴"
     lines.append("")
-    lines.append(f"{tem} *TOPLAM* — {tot_w} kâr, {tot_l} zarar — ort. *%{av}*")
+    lines.append(f"{tem} *TOPLAM* — {tot_w} kâr, {tot_l} zarar — "
+                 f"ort. *%{av}* — {tot_lots} lot")
     try:
         await msg.edit_text("\n".join(lines), parse_mode="Markdown")
     except Exception as e:
