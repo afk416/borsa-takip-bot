@@ -433,6 +433,7 @@ def watchlist_markup(wl, quotes, edit_mode: bool) -> InlineKeyboardMarkup:
             InlineKeyboardButton("➕ Hisse Ekle", callback_data="wl:add"),
             InlineKeyboardButton("🗑 Hisse Çıkar", callback_data="wl:edit"),
         ])
+        rows.append([InlineKeyboardButton("📊 Liste Analizi", callback_data="wl:analiz")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -1024,6 +1025,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     await q.answer("Zaten yok")
                 await refresh_watchlist_message(q, user, edit_mode=True)
+            elif action == "analiz":
+                await q.answer("📊 Liste analiz ediliyor...")
+                await analyze_watchlist(chat_id, user)
 
         # ---- Alarm işlemleri ----
         elif ns == "a":
@@ -1236,6 +1240,76 @@ def analyze_period_buttons(sym, current_key) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row])
 
 
+async def _fetch_backtest_chart(sym, ikey):
+    """Analiz için OHLCV çeker: önce TradingView (uzun geçmiş), olmazsa Yahoo.
+    Döner (chart, kaynak_adı) — chart None ise veri yok."""
+    if tv_client.is_enabled():
+        chart = await asyncio.to_thread(tv_client.fetch_history, sym, ikey)
+        if chart and len(chart["closes"]) >= 40:
+            return chart, "TradingView"
+    yh_iv, yh_rng, _ = yahoo_client.BACKTEST_RANGE.get(
+        ikey, yahoo_client.BACKTEST_RANGE["gunluk"])
+    chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, yh_iv, yh_rng)
+    if chart and len(chart["closes"]) >= 40:
+        return chart, "Yahoo"
+    return None, ""
+
+
+async def analyze_watchlist(chat_id, user):
+    """Listedeki tüm hisseleri tablo halinde analiz eder (hisse·karlı·zararlı·K/Z%)."""
+    wl = user["watchlist"]
+    if not wl:
+        await _send(chat_id, "⭐ Listen boş. Önce hisse ekle.")
+        return
+    st = user["settings"]
+    ikey = st.get("interval", "gunluk")
+    is_cycle = st.get("analysis_mode", "lot") == "islem"
+
+    try:
+        msg = await _app.bot.send_message(
+            chat_id=chat_id, text=f"📊 Liste analiz ediliyor (0/{len(wl)})...")
+    except Exception:
+        return
+
+    rows = []
+    for idx, sym in enumerate(wl, 1):
+        chart, _src = await _fetch_backtest_chart(sym, ikey)
+        if chart is None:
+            rows.append((base_sym(sym), None))
+        else:
+            res = await asyncio.to_thread(strategy.backtest, chart, st)
+            rows.append((base_sym(sym), res))
+        try:
+            await msg.edit_text(f"📊 Liste analiz ediliyor ({idx}/{len(wl)})...")
+        except Exception:
+            pass
+
+    # Tablo (monospace)
+    tbl = [f"{'Hisse':<7}{'Kâr':>4}{'Zar':>4}{'K/Z%':>9}"]
+    for name, res in rows:
+        if res is None:
+            tbl.append(f"{name:<7}{'-':>4}{'-':>4}{'-':>9}")
+            continue
+        if is_cycle:
+            w, l, p = res["cycle_wins"], res["cycle_losses"], res["cycle_total_pct"]
+        else:
+            w, l, p = res["wins"], res["losses"], res["total_pct"]
+        val = fmt_num(p, 1)
+        if p >= 0:
+            val = "+" + val
+        tbl.append(f"{name:<7}{w:>4}{l:>4}{val:>9}")
+
+    mod_adi = "İşlem bazlı" if is_cycle else "Lot bazlı"
+    text = (f"📊 *Liste Analizi*\n"
+            f"_{mod_adi} · {interval_label(ikey)} · geçmiş veriyle backtest_\n"
+            f"```\n" + "\n".join(tbl) + "\n```\n"
+            "_Kâr/Zar = kârlı/zararlı işlem sayısı. Yatırım tavsiyesi değildir._")
+    try:
+        await msg.edit_text(text, parse_mode="Markdown")
+    except Exception as e:
+        log.error(f"Liste analizi mesajı düzenlenemedi: {e}")
+
+
 async def analyze_symbol(chat_id, user, sym, interval_key=None, edit_message=None):
     """Backtest: lot biriktirmeli AL→SAT, seçilen zaman diliminde."""
     st = user["settings"]
@@ -1253,19 +1327,8 @@ async def analyze_symbol(chat_id, user, sym, interval_key=None, edit_message=Non
         return
 
     # Önce TradingView (uzun geçmiş), olmazsa Yahoo'ya fallback
-    chart, src = None, ""
-    if tv_client.is_enabled():
-        chart = await asyncio.to_thread(tv_client.fetch_history, sym, ikey)
-        if chart and len(chart["closes"]) >= 40:
-            src = "TradingView"
-        else:
-            chart = None
+    chart, src = await _fetch_backtest_chart(sym, ikey)
     if chart is None:
-        yh_iv, yh_rng, _ = yahoo_client.BACKTEST_RANGE.get(
-            ikey, yahoo_client.BACKTEST_RANGE["gunluk"])
-        chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, yh_iv, yh_rng)
-        src = "Yahoo"
-    if not chart or len(chart["closes"]) < 40:
         await msg.edit_text(f"❌ {base_sym(sym)} için yeterli geçmiş veri yok.")
         return
 
