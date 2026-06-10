@@ -22,6 +22,7 @@ import config
 import users
 import strategy
 import yahoo_client
+import tv_client
 
 log = logging.getLogger(__name__)
 
@@ -1231,29 +1232,44 @@ async def analyze_symbol(chat_id, user, sym, interval_key=None, edit_message=Non
     """Backtest: lot biriktirmeli AL→SAT, seçilen zaman diliminde."""
     st = user["settings"]
     ikey = interval_key or st.get("interval", "gunluk")
-    yh_iv, yh_rng, period_label = yahoo_client.BACKTEST_RANGE.get(
-        ikey, yahoo_client.BACKTEST_RANGE["gunluk"])
+    iv_label = interval_label(ikey)
 
     try:
         if edit_message is not None:
             msg = edit_message
-            await msg.edit_text(f"📊 {period_label} analiz ediliyor...")
+            await msg.edit_text(f"📊 {iv_label} analiz ediliyor...")
         else:
             msg = await _app.bot.send_message(
-                chat_id=chat_id, text=f"📊 {period_label} analiz ediliyor, bekle...")
+                chat_id=chat_id, text=f"📊 {iv_label} analiz ediliyor, bekle...")
     except Exception:
         return
 
-    chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, yh_iv, yh_rng)
+    # Önce TradingView (uzun geçmiş), olmazsa Yahoo'ya fallback
+    chart, src = None, ""
+    if tv_client.is_enabled():
+        chart = await asyncio.to_thread(tv_client.fetch_history, sym, ikey)
+        if chart and len(chart["closes"]) >= 40:
+            src = "TradingView"
+        else:
+            chart = None
+    if chart is None:
+        yh_iv, yh_rng, _ = yahoo_client.BACKTEST_RANGE.get(
+            ikey, yahoo_client.BACKTEST_RANGE["gunluk"])
+        chart = await asyncio.to_thread(yahoo_client.fetch_history, sym, yh_iv, yh_rng)
+        src = "Yahoo"
     if not chart or len(chart["closes"]) < 40:
         await msg.edit_text(f"❌ {base_sym(sym)} için yeterli geçmiş veri yok.")
         return
 
     res = await asyncio.to_thread(strategy.backtest, chart, st)
 
+    # Dönem etiketi: kaç mum, kaç gün (verinin kendisinden)
+    span_days = max(1, (chart["timestamps"][-1] - chart["timestamps"][0]) // 86400)
+    period_label = f"{src} · {iv_label} · {res['bars']} mum (~{span_days} gün)"
+
     header = (f"📊 *{base_sym(sym)} — Geçmiş Analizi*\n"
               f"_Ayar: RSI({st['rsi_period']}) · {st.get('signal_mode', 'Crossover')} · "
-              f"{period_label} ({res['bars']} mum)_\n\n")
+              f"{period_label}_\n\n")
 
     if res["trades"] == 0:
         body = ("Bu ayarlarla bu dönemde tamamlanmış (AL→SAT) işlem oluşmadı."
