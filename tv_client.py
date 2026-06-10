@@ -55,8 +55,7 @@ def _resolve(symbol: str):
     return s, ["NASDAQ", "NYSE", "AMEX"]
 
 
-def fetch_history(symbol: str, interval_key: str = "gunluk"):
-    """OHLCV dict döner (yahoo_client.fetch_history şeması). Hata/boşsa None."""
+def _fetch_once(symbol: str, interval_key: str):
     try:
         tv = _get_tv()
         iv = _interval(interval_key)
@@ -84,3 +83,17 @@ def fetch_history(symbol: str, interval_key: str = "gunluk"):
     except Exception as e:
         log.warning(f"tvdatafeed hatası ({symbol}/{interval_key}): {e}")
         return None
+
+
+def fetch_history(symbol: str, interval_key: str = "gunluk", retries: int = 2):
+    """OHLCV dict döner. tvdatafeed ara sıra ilk denemede boş döndüğü için
+    retry yapar (bağlantıyı yenileyerek) → tutarlı sonuç. Hepsi boşsa None."""
+    global _tv
+    for attempt in range(retries + 1):
+        out = _fetch_once(symbol, interval_key)
+        if out:
+            return out
+        if attempt < retries:        # bağlantıyı sıfırla, tekrar dene
+            with _lock:
+                _tv = None
+    return None
