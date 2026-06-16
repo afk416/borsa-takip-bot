@@ -321,6 +321,79 @@ def backtest(chart: dict, st: dict) -> dict:
     }
 
 
+def recent_signal(chart: dict, st: dict, hours: int = 4):
+    """Son `hours` saat içinde EN SON AL/SAT sinyalini bulur (backtest mantığı).
+    Döner: {side, price, now, change_pct, mins_ago} veya None.
+    change_pct = sinyal barındaki fiyattan şu anki fiyata değişim."""
+    closes = chart["closes"]
+    highs  = chart["highs"]
+    lows   = chart["lows"]
+    vols   = chart["volumes"]
+    ts     = chart["timestamps"]
+    n = len(closes)
+    if n < 3:
+        return None
+
+    bar_sec = ts[1] - ts[0] if (ts[1] - ts[0]) > 0 else 900
+    lookback = max(1, int(hours * 3600 / bar_sec))
+
+    period = int(st.get("rsi_period", 21))
+    smooth = int(st.get("rsi_smooth", 1))
+    low    = float(st.get("rsi_low", 25))
+    high   = float(st.get("rsi_high", 78))
+    mode   = st.get("signal_mode", "Crossover")
+    vf  = st.get("vol_filter", True)
+    vml = int(st.get("vol_ma_len", config.VOLUME_MA_LEN))
+    vmu = float(st.get("vol_mult", config.VOLUME_MULTIPLIER))
+    rf  = st.get("range_filter", True)
+    rl  = int(st.get("range_len", config.RANGE_FILTER_LEN))
+    mr  = float(st.get("min_range", config.MIN_RANGE_PCT))
+    need = max(period, vml, rl) + 5
+    if n < need + 2:
+        return None
+
+    rsis = rsi_series(closes, period)
+    rmas = ema_series(rsis, smooth)
+    last_price = closes[-1]
+
+    found = None
+    start = max(need, n - lookback)
+    for i in range(start, n):
+        rn, rp = rsis[i], rsis[i - 1]
+        mn, mp = rmas[i], rmas[i - 1]
+        if rn is None or rp is None or mn is None or mp is None:
+            continue
+        if mode == "RSI 50 Cross":
+            ls, ss = _crossover(mp, mn, 50, 50), _crossunder(mp, mn, 50, 50)
+        elif mode == "RSI EMA Cross":
+            ls, ss = _crossover(rp, rn, mp, mn), _crossunder(rp, rn, mp, mn)
+        else:
+            ls, ss = _crossover(mp, mn, low, low), _crossunder(mp, mn, high, high)
+        if not (ls or ss):
+            continue
+        ok = True
+        if vf:
+            win = [v for v in vols[i - vml:i] if v is not None]
+            if win:
+                vma = sum(win) / len(win)
+                if vma > 0 and not (vols[i] > vma * vmu):
+                    ok = False
+        if ok and rf:
+            rngs = [(highs[j] - lows[j]) / closes[j] * 100
+                    for j in range(i - rl, i) if closes[j]]
+            if rngs and (sum(rngs) / len(rngs)) < mr:
+                ok = False
+        if ok:
+            found = {"side": "long" if ls else "short", "i": i, "price": closes[i]}
+
+    if not found or not found["price"]:
+        return None
+    change = (last_price - found["price"]) / found["price"] * 100.0
+    mins_ago = int((n - 1 - found["i"]) * bar_sec / 60)
+    return {"side": found["side"], "price": found["price"], "now": last_price,
+            "change_pct": change, "mins_ago": mins_ago}
+
+
 def open_lot_timeline(chart: dict, st: dict):
     """Her bar için o an AÇIK (alınmış ama satılmamış) lot sayısı.
     Döner: [(timestamp, open_count), ...]. backtest ile aynı sinyal mantığı."""

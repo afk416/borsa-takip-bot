@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 
 _app: Application = None
 
+BTN_SIGNALS   = "🔔 Sinyal Verenler"
 BTN_RSI       = "📈 RSI Tarama"
 BTN_PORTFOLIO = "💼 Portföyüm"
 BTN_WATCHLIST = "⭐ Listem"
@@ -38,7 +39,7 @@ BTN_SUMMARY   = "🧾 İşlem Özeti"
 BTN_OPENLOT   = "📈 Açık Lot Grafiği"
 BTN_HELP      = "❓ Yardım"
 
-MENU_BUTTONS = {BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
+MENU_BUTTONS = {BTN_SIGNALS, BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
                 BTN_ADD, BTN_SETTINGS, BTN_SUMMARY, BTN_OPENLOT, BTN_HELP}
 
 
@@ -48,6 +49,7 @@ MENU_BUTTONS = {BTN_RSI, BTN_PORTFOLIO, BTN_WATCHLIST,
 def main_menu_keyboard():
     return ReplyKeyboardMarkup(
         [
+            [KeyboardButton(BTN_SIGNALS)],
             [KeyboardButton(BTN_RSI),       KeyboardButton(BTN_WATCHLIST)],
             [KeyboardButton(BTN_PORTFOLIO), KeyboardButton(BTN_ADD)],
             [KeyboardButton(BTN_SETTINGS),  KeyboardButton(BTN_SUMMARY)],
@@ -974,7 +976,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user["pending"] = None   # tanınmayan pending'i temizle
 
     # 2) Ana menü butonları
-    if text == BTN_RSI:
+    if text == BTN_SIGNALS:
+        await show_signal_givers(update, user)
+    elif text == BTN_RSI:
         await show_rsi_scan(update, user)
     elif text == BTN_PORTFOLIO:
         await show_portfolio(update, user)
@@ -1310,6 +1314,70 @@ def analyze_period_buttons(sym, current_key) -> InlineKeyboardMarkup:
                                 callback_data=f"an2:{sym}:{k}")
            for k, lbl in opts]
     return InlineKeyboardMarkup([row])
+
+
+def _fmt_ago(mins: int) -> str:
+    if mins < 60:
+        return f"{mins}dk"
+    h, m = divmod(mins, 60)
+    return f"{h}sa" if m == 0 else f"{h}sa{m}dk"
+
+
+async def show_signal_givers(update: Update, user):
+    """60 BIST + 60 ABD hissesini tarar, son 4 saatte sinyal verenleri
+    sinyalden sonraki değişimle tablo halinde listeler."""
+    st = user["settings"]
+    ikey = st.get("interval", "gunluk")
+    allsym = [s + ".IS" for s in config.BIST_60] + list(config.US_60)
+
+    msg = await update.message.reply_text(
+        f"🔔 {len(allsym)} hisse taranıyor (0/{len(allsym)})...")
+
+    async def scan_one(sym):
+        chart = await asyncio.to_thread(yahoo_client.fetch_chart, sym, ikey)
+        if not chart:
+            return None
+        sig = strategy.recent_signal(chart, st, hours=4)
+        return (base_sym(sym), sig) if sig else None
+
+    results = []
+    done = 0
+    B = 20
+    for i in range(0, len(allsym), B):
+        chunk = allsym[i:i + B]
+        rs = await asyncio.gather(*[scan_one(s) for s in chunk])
+        results += [r for r in rs if r]
+        done += len(chunk)
+        try:
+            await msg.edit_text(f"🔔 {len(allsym)} hisse taranıyor ({done}/{len(allsym)})...")
+        except Exception:
+            pass
+
+    if not results:
+        await msg.edit_text(
+            "🔔 *Sinyal Verenler*\n\nSon 4 saatte sinyal veren hisse yok.\n"
+            "_(Eşiklerin 25/78 oldukça ekstrem — sinyal seyrek gelir. "
+            "Daha sık görmek için Ayarlar'dan eşikleri 35/65 yapabilirsin.)_",
+            parse_mode="Markdown")
+        return
+
+    # En yeni sinyal önce
+    results.sort(key=lambda r: r[1]["mins_ago"])
+
+    WN, WS, WD, WA = 8, 5, 9, 7
+    head = f"{'HİSSE':<{WN}}{'YÖN':<{WS}}{'DEĞİŞİM':>{WD}}{'ÖNCE':>{WA}}"
+    tbl = [head]
+    for name, sig in results:
+        yon = "AL" if sig["side"] == "long" else "SAT"
+        em = "🟢" if sig["side"] == "long" else "🔴"
+        ch = sig["change_pct"]
+        chs = ("+" if ch >= 0 else "") + fmt_num(ch, 1) + "%"
+        tbl.append(f"{name:<{WN}}{yon:<{WS}}{chs:>{WD}}{_fmt_ago(sig['mins_ago']):>{WA}}  {em}")
+
+    inner = (f"{interval_label(ikey)} · son 4 saat · {len(results)} sinyal\n"
+             "DEĞİŞİM = sinyalden bu yana fiyat\n\n" + "\n".join(tbl))
+    await msg.edit_text("🔔 *Sinyal Verenler*\n```\n" + inner + "\n```",
+                        parse_mode="Markdown")
 
 
 async def _fetch_backtest_chart(sym, ikey):
