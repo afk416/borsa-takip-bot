@@ -977,7 +977,15 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # 2) Ana menü butonları
     if text == BTN_SIGNALS:
-        await show_signal_givers(update, user)
+        await update.message.reply_text(
+            "🔔 *Sinyal Verenler* — hangi grubu tarayayım?\n"
+            "_(BIST/ABD ~200 hisse · son 1 gün · birkaç dakika sürebilir)_",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("📈 BIST", callback_data="sg:bist"),
+                InlineKeyboardButton("🇺🇸 ABD", callback_data="sg:us"),
+                InlineKeyboardButton("🌐 Hepsi", callback_data="sg:all"),
+            ]]))
     elif text == BTN_RSI:
         await show_rsi_scan(update, user)
     elif text == BTN_PORTFOLIO:
@@ -1035,6 +1043,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     users.save_async()
                 await q.answer(f"➖ {base_sym(payload)} çıkarıldı", show_alert=False)
                 await _send(chat_id, f"🗑 *{base_sym(payload)}* listenden çıkarıldı.")
+
+        # ---- Sinyal Verenler kategorileri (BIST / ABD / Hepsi) ----
+        elif ns == "sg":
+            await q.answer("🔔 Tarama başlıyor...")
+            await show_signal_givers(chat_id, user, parts[1])
 
         # ---- Hisse ekle kategorileri (BIST / ABD) ----
         elif ns == "ad":
@@ -1323,15 +1336,23 @@ def _fmt_ago(mins: int) -> str:
     return f"{h}sa" if m == 0 else f"{h}sa{m}dk"
 
 
-async def show_signal_givers(update: Update, user):
-    """60 BIST + 60 ABD hissesini tarar, son 4 saatte sinyal verenleri
-    sinyalden sonraki değişimle tablo halinde listeler."""
+async def show_signal_givers(chat_id, user, kategori="all"):
+    """200 BIST / 200 ABD / hepsini tarar, son 1 günde sinyal verenleri
+    sinyalden sonraki değişimle tablo halinde listeler. kategori: bist|us|all."""
     st = user["settings"]
     ikey = st.get("interval", "gunluk")
-    allsym = [s + ".IS" for s in config.BIST_60] + list(config.US_60)
+    if kategori == "bist":
+        allsym = [s + ".IS" for s in config.BIST_200]
+        kat = "BIST"
+    elif kategori == "us":
+        allsym = list(config.US_200)
+        kat = "ABD"
+    else:
+        allsym = [s + ".IS" for s in config.BIST_200] + list(config.US_200)
+        kat = "Hepsi"
 
-    msg = await update.message.reply_text(
-        f"🔔 {len(allsym)} hisse taranıyor (0/{len(allsym)})...")
+    msg = await _app.bot.send_message(
+        chat_id=chat_id, text=f"🔔 {kat}: {len(allsym)} hisse taranıyor (0/{len(allsym)})...")
 
     async def scan_one(sym):
         chart = await asyncio.to_thread(yahoo_client.fetch_chart, sym, ikey)
@@ -1349,13 +1370,13 @@ async def show_signal_givers(update: Update, user):
         results += [r for r in rs if r]
         done += len(chunk)
         try:
-            await msg.edit_text(f"🔔 {len(allsym)} hisse taranıyor ({done}/{len(allsym)})...")
+            await msg.edit_text(f"🔔 {kat}: {len(allsym)} hisse taranıyor ({done}/{len(allsym)})...")
         except Exception:
             pass
 
     if not results:
         await msg.edit_text(
-            "🔔 *Sinyal Verenler*\n\nSon 1 günde sinyal veren hisse yok.\n"
+            f"🔔 *Sinyal Verenler ({kat})*\n\nSon 1 günde sinyal veren hisse yok.\n"
             "_(Eşiklerin 25/78 oldukça ekstrem — sinyal seyrek gelir. "
             "Daha sık görmek için Ayarlar'dan eşikleri 35/65 yapabilirsin.)_",
             parse_mode="Markdown")
@@ -1376,7 +1397,7 @@ async def show_signal_givers(update: Update, user):
 
     inner = (f"{interval_label(ikey)} · son 1 gün · {len(results)} sinyal\n"
              "DEĞİŞİM = sinyalden bu yana fiyat\n\n" + "\n".join(tbl))
-    await msg.edit_text("🔔 *Sinyal Verenler*\n```\n" + inner + "\n```",
+    await msg.edit_text(f"🔔 *Sinyal Verenler ({kat})*\n```\n" + inner + "\n```",
                         parse_mode="Markdown")
 
 

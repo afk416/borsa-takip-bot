@@ -62,27 +62,61 @@ SL_ATR_MULT       = 1.5       # önerilen Stop-Loss = fiyat ∓ ATR × bu
 TP_ATR_MULT       = 3.0       # önerilen Take-Profit = fiyat ± ATR × bu
 
 # ============================================================
-# HIZLI EKLEME LİSTELERİ (Yahoo'da doğrulanmış, ilk ~60 büyük hisse)
+# HIZLI EKLEME / TARAMA LİSTELERİ (Yahoo'da doğrulanmış, ilk ~200 büyük hisse)
+# BIST: BIST 30/100 + Yıldız Pazar | ABD: S&P 500 market cap ilk 200
 # ============================================================
-BIST_60 = [
-    "THYAO", "GARAN", "AKBNK", "ISCTR", "YKBNK", "BIMAS", "EREGL", "SISE",
-    "KCHOL", "TUPRS", "SASA", "FROTO", "TCELL", "HEKTS", "PETKM", "ENKAI",
-    "TOASO", "ASELS", "PGSUS", "MGROS", "TAVHL", "SAHOL", "ARCLK", "EKGYO",
-    "TKFEN", "VESTL", "GUBRF", "KRDMD", "ALARK", "TTKOM", "DOHOL", "SOKM",
-    "ULKER", "AEFES", "CCOLA", "OYAKC", "SMRTG", "BRSAN", "ENJSA", "AKSEN",
-    "CIMSA", "KONTR", "ASTOR", "EUPWR", "ISMEN", "ZOREN", "ECILC", "BERA",
-    "AGHOL", "KARSN", "OTKAR", "TTRAK", "AKSA", "CANTE", "BIOEN", "ALFAS",
-    "HALKB", "VAKBN", "ISGYO", "TSKB",
+BIST_200 = [
+    "THYAO", "GARAN", "AKBNK", "ISCTR", "YKBNK", "VAKBN", "HALKB", "KCHOL",
+    "SAHOL", "ASELS", "BIMAS", "TUPRS", "EREGL", "SISE", "FROTO", "TOASO",
+    "TCELL", "TTKOM", "SASA", "PETKM", "KRDMD", "ENKAI", "PGSUS", "TAVHL",
+    "MGROS", "GUBRF", "ASTOR", "AEFES", "EKGYO", "TRALT", "ARCLK", "CCOLA",
+    "TTRAK", "OYAKC", "OTKAR", "AKSA", "AKSEN", "ALARK", "DOAS", "HEKTS",
+    "TKFEN", "ULKER", "VESTL", "VESBE", "SOKM", "ENJSA", "SKBNK", "TSKB",
+    "ISMEN", "BRSAN", "BRYAT", "AGHOL", "MAVI", "MPARK", "SELEC", "ECILC",
+    "TRMET", "TRENJ", "ZOREN", "ODAS", "KONTR", "SMRTG", "CIMSA", "AKCNS",
+    "NUHCM", "BUCIM", "BSOKE", "BTCIM", "GESAN", "EUPWR", "CWENE", "ENERY",
+    "AGROT", "QUAGR", "DOHOL", "GLYHO", "NTHOL", "PAHOL", "BERA", "ALBRK",
+    "ANSGR", "AGESA", "ANHYT", "AKGRT", "TURSG", "RALYH", "EUREN", "KLRHO",
+    "KUYAS", "MAGEN", "MIATK", "ARDYZ", "KAREL", "LOGO", "INDES", "PAPIL",
+    "REEDR", "PATEK", "GRTHO", "GLRMK", "OBAMS", "TABGD", "BALSU", "GENIL",
+    "EFOR", "TUKAS", "GOKNR", "TATEN", "KCAER", "KTLEV", "ALFAS", "AHGAZ",
+    "BASGZ", "AYGAZ", "GWIND", "BIOEN", "AYDEM", "NATEN", "AKFYE", "IZENR",
+    "ZRGYO", "TRGYO", "ALGYO", "AKFGY", "AKSGY", "ISGYO", "KLGYO", "PSGYO",
+    "SNGYO", "SRVGY", "VKGYO", "HLGYO", "PAGYO", "RYGYO", "KZBGY", "DAPGM",
+    "ADGYO", "AVPGY", "EGEEN", "KATMR", "PARSN", "BFREN", "KORDS", "BRISA",
+    "GOLTS", "DEVA", "EGGUB", "SARKY", "TMSN", "ISDMR", "KRDMA", "KRDMB",
+    "CLEBI", "CANTE", "POLHO", "POLTK", "KMPUR", "KLKIM", "BOBET", "YEOTK",
+    "ESEN", "GENTS", "VAKKO", "KOTON", "SUWEN", "SUNTK", "YYLGD", "LILAK",
+    "MOGAN", "ENTRA", "BIGEN", "MOPAS", "EBEBK", "GIPTA", "HRKET", "LYDHO",
+    "LMKDC", "ARMGD", "BINHO", "BINBN", "KOPOL", "CVKMD", "PASEU", "A1CAP",
+    "INVEO", "OYYAT", "GLCVY", "ESCAR", "ECZYT", "GEDIK", "RYSAS", "GMTAS",
+    "MEGMT", "ATAKP", "ATATP", "USAK", "EGPRO", "KAYSE", "ALTNY", "FENER",
 ]
 
-US_60 = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "AVGO", "JPM",
-    "LLY", "V", "UNH", "XOM", "MA", "JNJ", "PG", "HD", "COST", "ORCL", "ABBV",
-    "MRK", "CVX", "KO", "PEP", "BAC", "ADBE", "NFLX", "AMD", "CRM", "TMO",
-    "WMT", "ACN", "MCD", "CSCO", "ABT", "LIN", "DHR", "INTC", "QCOM", "TXN",
-    "PM", "DIS", "VZ", "INTU", "IBM", "CAT", "GE", "NOW", "AMGN", "NKE",
-    "SPGI", "GS", "ISRG", "BKNG", "UBER", "RTX", "HON", "T", "PFE", "BA",
+US_200 = [
+    "NVDA", "GOOGL", "GOOG", "AAPL", "MSFT", "AMZN", "AVGO", "META", "TSLA",
+    "MU", "LLY", "WMT", "JPM", "AMD", "V", "INTC", "XOM", "JNJ", "ORCL",
+    "CSCO", "LRCX", "AMAT", "MA", "COST", "CAT", "BAC", "ABBV", "UNH", "GE",
+    "CVX", "PG", "MS", "KO", "HD", "GS", "NFLX", "PLTR", "KLAC", "SNDK", "PM",
+    "MRK", "TXN", "GEV", "DELL", "WFC", "IBM", "RTX", "C", "LIN", "WDC", "STX",
+    "AXP", "PANW", "QCOM", "ANET", "MCD", "ADI", "PEP", "TMUS", "APH", "VZ",
+    "AMGN", "TJX", "NEE", "BA", "DIS", "TMO", "APP", "CRWD", "BLK", "SCHW",
+    "T", "UNP", "ETN", "DE", "GILD", "ABT", "BX", "GLW", "WELL", "UBER", "PFE",
+    "ISRG", "HON", "PLD", "COP", "BKNG", "CRM", "CVS", "DHR", "SPGI", "CB",
+    "LOW", "COF", "LMT", "PGR", "SYK", "PH", "MO", "SBUX", "NEM", "VRT",
+    "VRTX", "BMY", "HWM", "EQIX", "PWR", "FTNT", "CDNS", "SO", "MAR", "TT",
+    "NOW", "MDT", "ACN", "FCX", "BNY", "GD", "DUK", "CMI", "CEG", "CME", "PNC",
+    "UPS", "MCK", "USB", "MNST", "KKR", "ADP", "JCI", "HCA", "WM", "WMB",
+    "CSX", "HOOD", "ELV", "AMT", "SNPS", "CMCSA", "MMM", "RCL", "ABNB", "EMR",
+    "ADBE", "DDOG", "SPG", "MCO", "MRSH", "FDX", "ICE", "APO", "MDLZ", "HLT",
+    "SLB", "SHW", "NOC", "CVNA", "CI", "ECL", "INTU", "NXPI", "ITW", "CRH",
+    "ROST", "ORLY", "COHR", "GM", "DASH", "MPWR", "MPC", "TDG", "CL", "VLO",
+    "AON", "CTAS", "AEP", "EOG", "KMI", "NSC", "BSX", "PSX", "DLR", "LITE",
+    "FIX", "MSI", "URI", "NKE", "WBD", "TRV", "RSG", "TER", "HPE", "PCAR",
+    "TEL", "REGN", "APD", "GWW", "TFC", "BKR", "CIEN",
 ]
 
-# Geriye uyumluluk (eski referanslar için)
-POPULAR_BIST = BIST_60[:18]
+# Hisse Ekle menüsünde ilk 60 göster (grid makul kalsın); tarama tam listeyi kullanır
+BIST_60 = BIST_200[:60]
+US_60   = US_200[:60]
+POPULAR_BIST = BIST_200[:18]
