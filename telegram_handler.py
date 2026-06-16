@@ -1337,7 +1337,7 @@ async def show_signal_givers(update: Update, user):
         chart = await asyncio.to_thread(yahoo_client.fetch_chart, sym, ikey)
         if not chart:
             return None
-        sig = strategy.recent_signal(chart, st, hours=4)
+        sig = strategy.recent_signal(chart, st, hours=24)
         return (base_sym(sym), sig) if sig else None
 
     results = []
@@ -1355,7 +1355,7 @@ async def show_signal_givers(update: Update, user):
 
     if not results:
         await msg.edit_text(
-            "🔔 *Sinyal Verenler*\n\nSon 4 saatte sinyal veren hisse yok.\n"
+            "🔔 *Sinyal Verenler*\n\nSon 1 günde sinyal veren hisse yok.\n"
             "_(Eşiklerin 25/78 oldukça ekstrem — sinyal seyrek gelir. "
             "Daha sık görmek için Ayarlar'dan eşikleri 35/65 yapabilirsin.)_",
             parse_mode="Markdown")
@@ -1374,7 +1374,7 @@ async def show_signal_givers(update: Update, user):
         chs = ("+" if ch >= 0 else "") + fmt_num(ch, 1) + "%"
         tbl.append(f"{name:<{WN}}{yon:<{WS}}{chs:>{WD}}{_fmt_ago(sig['mins_ago']):>{WA}}  {em}")
 
-    inner = (f"{interval_label(ikey)} · son 4 saat · {len(results)} sinyal\n"
+    inner = (f"{interval_label(ikey)} · son 1 gün · {len(results)} sinyal\n"
              "DEĞİŞİM = sinyalden bu yana fiyat\n\n" + "\n".join(tbl))
     await msg.edit_text("🔔 *Sinyal Verenler*\n```\n" + inner + "\n```",
                         parse_mode="Markdown")
