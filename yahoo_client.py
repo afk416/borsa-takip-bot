@@ -63,15 +63,22 @@ def _get(url: str, params: dict):
     return None
 
 
-def _chart_raw(symbol: str, yh_interval: str, yh_range: str):
-    data = _get(f"/v8/finance/chart/{symbol}",
-                {"interval": yh_interval, "range": yh_range})
+def _chart_raw(symbol: str, yh_interval: str, yh_range: str, prepost: bool = False):
+    params = {"interval": yh_interval, "range": yh_range}
+    if prepost:
+        params["includePrePost"] = "true"   # ABD: pre/post market (TradingView gibi)
+    data = _get(f"/v8/finance/chart/{symbol}", params)
     if not data:
         return None
     result = (data.get("chart") or {}).get("result") or []
     if not result:
         return None
     return result[0]
+
+
+def _is_us(symbol: str) -> bool:
+    """ABD hissesi mi? (.IS = BIST, değilse ABD/uluslararası)."""
+    return not symbol.upper().endswith(".IS")
 
 
 def _extract(res):
@@ -117,7 +124,7 @@ def fetch_chart(symbol: str, interval_key: str = "gunluk"):
         return cached[1]
 
     yh_interval, yh_range, _ = INTERVALS.get(interval_key, INTERVALS["gunluk"])
-    out = _extract(_chart_raw(symbol, yh_interval, yh_range))
+    out = _extract(_chart_raw(symbol, yh_interval, yh_range, prepost=_is_us(symbol)))
     if out:
         _chart_cache[key] = (time.time(), out)
     return out
@@ -125,7 +132,7 @@ def fetch_chart(symbol: str, interval_key: str = "gunluk"):
 
 def fetch_history(symbol: str, yh_interval: str = "1d", yh_range: str = "1y"):
     """Backtest için uzun geçmiş (varsayılan 1 yıl günlük). Cache'siz."""
-    return _extract(_chart_raw(symbol, yh_interval, yh_range))
+    return _extract(_chart_raw(symbol, yh_interval, yh_range, prepost=_is_us(symbol)))
 
 
 def get_quote(symbol: str):
